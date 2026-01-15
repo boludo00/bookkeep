@@ -28,6 +28,8 @@ interface RequestDialogProps {
   book: Book;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  preferredFormat?: FormatSelection;
+  disableFormats?: { ebook?: boolean; audiobook?: boolean };
 }
 
 type FormatSelection = 'ebook' | 'audiobook' | 'both';
@@ -59,7 +61,13 @@ function getStatusBadge(status: string | null) {
   );
 }
 
-export function RequestDialog({ book, open, onOpenChange }: RequestDialogProps) {
+export function RequestDialog({
+  book,
+  open,
+  onOpenChange,
+  preferredFormat,
+  disableFormats,
+}: RequestDialogProps) {
   const [selectedFormat, setSelectedFormat] = useState<FormatSelection | null>(null);
   const [notes, setNotes] = useState('');
   const [selectedEditionIds, setSelectedEditionIds] = useState<{ ebook?: number; audiobook?: number }>({});
@@ -89,8 +97,8 @@ export function RequestDialog({ book, open, onOpenChange }: RequestDialogProps) 
   const ebookAlreadyRequested = !!existingRequests?.ebook && existingRequests?.ebook !== 'not_found';
   const audiobookAlreadyRequested = !!existingRequests?.audiobook && existingRequests?.audiobook !== 'not_found';
   
-  const canRequestEbook = ebookConfigured && !ebookAlreadyRequested;
-  const canRequestAudiobook = audiobookConfigured && !audiobookAlreadyRequested;
+  const canRequestEbook = ebookConfigured && !ebookAlreadyRequested && !disableFormats?.ebook;
+  const canRequestAudiobook = audiobookConfigured && !audiobookAlreadyRequested && !disableFormats?.audiobook;
   const canRequestBoth = canRequestEbook && canRequestAudiobook;
 
   const { data: ebookEditions, isLoading: isLoadingEbookEditions } = useQuery({
@@ -110,7 +118,11 @@ export function RequestDialog({ book, open, onOpenChange }: RequestDialogProps) 
   // Auto-select the only available format
   useEffect(() => {
     if (!isLoadingFormats && !isLoadingRequests) {
-      if (canRequestEbook && !canRequestAudiobook) {
+      if (preferredFormat === 'ebook' && canRequestEbook) {
+        setSelectedFormat('ebook');
+      } else if (preferredFormat === 'audiobook' && canRequestAudiobook) {
+        setSelectedFormat('audiobook');
+      } else if (canRequestEbook && !canRequestAudiobook) {
         setSelectedFormat('ebook');
       } else if (canRequestAudiobook && !canRequestEbook) {
         setSelectedFormat('audiobook');
