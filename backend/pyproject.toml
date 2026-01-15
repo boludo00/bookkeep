@@ -1,0 +1,28 @@
+[project]
+name = "book-hound-backend"
+version = "1.0.0"
+description = "Backend API for Book Hound application"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi==0.115.0",
+    "uvicorn[standard]==0.32.0",
+    "sqlalchemy==2.0.36",
+    "psycopg2-binary==2.9.10",
+    "alembic==1.14.0",
+    "pydantic[email]==2.9.2",
+    "pydantic-settings==2.6.0",
+    "python-dotenv==1.0.1",
+    "python-multipart==0.0.12",
+    "passlib[bcrypt]==1.7.4",
+    "httpx==0.27.2",
+    "structlog==24.1.0",
+    "aiocache==0.12.2",
+    "redis==5.0.1",
+]
+
+[project.scripts]
+seed-database = "backend.scripts.seed_database:main"
+
+# This is an application, not a distributable package
+# No build-system needed for dependency management with uv
+

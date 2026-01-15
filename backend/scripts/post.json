@@ -1,0 +1,28 @@
+{
+    "foreignBookId": "26363",
+    "monitored": true,
+    "anyEditionOk": false,
+    "author": {
+        "foreignAuthorId": "197308",
+        "qualityProfileId": 1,
+        "metadataProfileId": 1,
+        "rootFolderPath": "/books",
+        "addOptions": {
+            "booksToMonitor": [
+                "26363"
+            ],
+            "monitored": true,
+            "searchForMissingBooks": false
+        }
+    },
+    "addOptions": {
+        "addType": "automatic",
+        "searchForNewBook": true
+    },
+    "editions": [
+        {
+            "foreignEditionId": "30426366",
+            "monitored": true
+        }
+    ]
+}

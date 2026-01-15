@@ -1,0 +1,137 @@
+name: Build and Publish Docker Image
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - "**"
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Retrieve latest version tag
+        id: get_version
+        run: |
+          latest_tag=$(git tag --list "v*" --sort=-v:refname | head -n 1)
+          latest_tag=${latest_tag:-"v0.0.0"}
+          echo "latest_tag=$latest_tag" >> "$GITHUB_ENV"
+
+      - name: Determine version bump (main only)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        id: determine_bump
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pr_number=$(git log -1 --pretty=%B | grep -oE 'Merge pull request #[0-9]+' | grep -oE '[0-9]+') || true
+          if [ -z "$pr_number" ]; then
+            pr_number=$(gh pr list --state merged --base main --limit 1 --json number --jq '.[0].number')
+          fi
+
+          labels=$(gh pr view "$pr_number" --json labels --jq '.labels[].name' || echo "")
+          if echo "$labels" | grep -q 'bump:major'; then
+            bump="major"
+          elif echo "$labels" | grep -q 'bump:minor'; then
+            bump="minor"
+          elif echo "$labels" | grep -q 'bump:patch'; then
+            bump="patch"
+          else
+            bump="patch"
+          fi
+
+          semver=$(echo "${{ env.latest_tag }}" | sed 's/^v//')
+          major=$(echo "$semver" | cut -d. -f1)
+          minor=$(echo "$semver" | cut -d. -f2)
+          patch=$(echo "$semver" | cut -d. -f3)
+
+          case "$bump" in
+            major) major=$((major+1)); minor=0; patch=0 ;;
+            minor) minor=$((minor+1)); patch=0 ;;
+            patch) patch=$((patch+1)) ;;
+          esac
+
+          new_tag="v${major}.${minor}.${patch}"
+          new_version="${major}.${minor}.${patch}"
+          echo "new_tag=$new_tag" >> "$GITHUB_ENV"
+          echo "new_version=$new_version" >> "$GITHUB_ENV"
+
+      - name: Set image tags
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            short_sha=$(echo "${GITHUB_SHA}" | cut -c1-7)
+            image_tags="akiraslingshot/bookkeep:pr-${{ github.event.pull_request.number }}-${short_sha}"
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            image_tags=$(printf "%s\n%s\n%s" \
+              "akiraslingshot/bookkeep:${{ env.new_tag }}" \
+              "akiraslingshot/bookkeep:${{ env.new_version }}" \
+              "akiraslingshot/bookkeep:latest")
+          elif [ "${{ github.ref }}" = "refs/heads/develop" ]; then
+            short_sha=$(git rev-parse --short HEAD)
+            image_tags="akiraslingshot/bookkeep:${{ env.latest_tag }}-develop-${short_sha}"
+          else
+            short_sha=$(git rev-parse --short HEAD)
+            image_tags="akiraslingshot/bookkeep:${short_sha}"
+          fi
+
+          {
+            echo "IMAGE_TAGS<<EOF"
+            echo "$image_tags"
+            echo "EOF"
+          } >> "$GITHUB_ENV"
+
+      - name: Create and push git tag (main only)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git rev-parse "${{ env.new_tag }}" >/dev/null 2>&1; then
+            echo "Tag ${{ env.new_tag }} already exists."
+          else
+            git tag "${{ env.new_tag }}"
+            git push origin "${{ env.new_tag }}"
+          fi
+
+      - name: Build (PR)
+        if: github.event_name == 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: false
+          tags: ${{ env.IMAGE_TAGS }}
+
+      - name: Build and push (main/develop)
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ env.IMAGE_TAGS }}

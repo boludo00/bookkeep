@@ -1,0 +1,141 @@
+{
+    "title": "The Unconsoled",
+    "authorTitle": "ishiguro, kazuo The Unconsoled",
+    "seriesTitle": "",
+    "disambiguation": "",
+    "overview": "Ryder, a musician of international renown, is checking in to a hotel in a city somewhere in Central Europe. He has the distinct recollection he is due to perform in the Civic Concert Hall in a few days time, but as Gustav, the hotel porter, escorts him to his room, it occurs to him there is much more to this visit than he had at first anticipated\u2026",
+    "authorId": 92,
+    "foreignBookId": "135240",
+    "foreignEditionId": "17304840",
+    "titleSlug": "135240",
+    "monitored": true,
+    "anyEditionOk": false,
+    "ratings": {
+        "votes": 36,
+        "value": 3.55555555555556,
+        "popularity": 128.00000000000014
+    },
+    "releaseDate": "1988-11-01T08:00:00Z",
+    "pageCount": 535,
+    "genres": [
+        "Fiction",
+        "Classics",
+        "Fantasy",
+        "Literature",
+        "Europe"
+    ],
+    "author": {
+        "authorMetadataId": 86,
+        "status": "continuing",
+        "ended": false,
+        "authorName": "Kazuo Ishiguro",
+        "authorNameLastFirst": "Ishiguro, Kazuo",
+        "foreignAuthorId": "204396",
+        "titleSlug": "204396",
+        "overview": "Sir Kazuo Ishiguro (\u30ab\u30ba\u30aa\u30fb\u30a4\u30b7\u30b0\u30ed or \u77f3\u9ed2 \u4e00\u96c4), OBE, FRSA, FRSL is a British novelist of Japanese origin and Nobel Laureate in Literature (2017). His family moved to England in 1960. Ishiguro obtained his Bachelor's degree from the University of Kent in 1978 and his Master's from the University of East Anglia's creative writing course in 1980. He became a British citizen in 1982. He now lives in London.\n\nHis first novel, A Pale View of Hills, won the 1982 Winifred Holtby Memorial Prize. His second novel, An Artist of the Floating World, won the 1986 Whitbread Prize. Ishiguro received the 1989 Man Booker prize for his third novel The Remains of the Day. His fourth novel, The Unconsoled, won the 1995 Cheltenham Prize. His latest novel is The Buried Giant, a New York Times bestseller. He was awarded the Nobel Prize in Literature 2017.\n\n\nIn 2008, The Times ranked Ishiguro 32nd on their list of \"The 50 Greatest British Writers Since 1945\". In 2017, the Swedish Academy awarded him the Nobel Prize in Literature, describing him in its citation as a writer \"who, in novels of great emotional force, has uncovered the abyss beneath our illusory sense of connection with the world\". ",
+        "links": [
+            {
+                "url": "https://hardcover.app/authors/kazuo-ishiguro",
+                "name": "Goodreads"
+            }
+        ],
+        "images": [
+            {
+                "url": "https://assets.hardcover.app/authors/204396/6597550-L.jpg",
+                "coverType": "poster",
+                "extension": ".jpg"
+            }
+        ],
+        "path": "/books/Kazuo Ishiguro",
+        "qualityProfileId": 1,
+        "metadataProfileId": 1,
+        "monitored": true,
+        "monitorNewItems": "none",
+        "folder": "Kazuo Ishiguro",
+        "genres": [],
+        "cleanName": "kazuoishiguro",
+        "sortName": "kazuo ishiguro",
+        "sortNameLastFirst": "ishiguro, kazuo",
+        "tags": [],
+        "added": "2026-01-09T01:17:09Z",
+        "ratings": {
+            "votes": 3127,
+            "value": 3.8253918,
+            "popularity": 11962.0001586
+        },
+        "statistics": {
+            "bookFileCount": 0,
+            "bookCount": 0,
+            "availableBookCount": 0,
+            "totalBookCount": 0,
+            "sizeOnDisk": 0,
+            "percentOfBooks": 0
+        },
+        "id": 92
+    },
+    "images": [
+        {
+            "url": "/MediaCoverProxy/5ba92a67818e4e7c4247e8ef6440e1ad3b337c3dba8465bf2d76c2f2257d0576/ca1d3869735638074ca3bbe9a33036c1918f2756.jpeg",
+            "coverType": "cover",
+            "extension": ".jpeg",
+            "remoteUrl": "https://assets.hardcover.app/edition/17304840/ca1d3869735638074ca3bbe9a33036c1918f2756.jpeg"
+        }
+    ],
+    "links": [
+        {
+            "url": "https://hardcover.app/books/the-unconsoled",
+            "name": "Goodreads Editions"
+        },
+        {
+            "url": "https://hardcover.app/books/the-unconsoled",
+            "name": "Goodreads Book"
+        }
+    ],
+    "added": "0001-01-01T07:53:00Z",
+    "remoteCover": "https://assets.hardcover.app/edition/17304840/ca1d3869735638074ca3bbe9a33036c1918f2756.jpeg",
+    "editions": [
+        {
+            "bookId": 0,
+            "foreignEditionId": "17304840",
+            "titleSlug": "17304840",
+            "isbn13": "9780571173877",
+            "asin": "",
+            "title": "The Unconsoled",
+            "language": "eng",
+            "overview": "Ryder, a musician of international renown, is checking in to a hotel in a city somewhere in Central Europe. He has the distinct recollection he is due to perform in the Civic Concert Hall in a few days time, but as Gustav, the hotel porter, escorts him to his room, it occurs to him there is much more to this visit than he had at first anticipated\u2026",
+            "format": "Hardcover",
+            "isEbook": false,
+            "disambiguation": "",
+            "publisher": "Faber",
+            "pageCount": 535,
+            "releaseDate": "1995-01-01T08:00:00Z",
+            "images": [
+                {
+                    "url": "/MediaCoverProxy/5ba92a67818e4e7c4247e8ef6440e1ad3b337c3dba8465bf2d76c2f2257d0576/ca1d3869735638074ca3bbe9a33036c1918f2756.jpeg",
+                    "coverType": "cover",
+                    "extension": ".jpeg",
+                    "remoteUrl": "https://assets.hardcover.app/edition/17304840/ca1d3869735638074ca3bbe9a33036c1918f2756.jpeg"
+                }
+            ],
+            "links": [
+                {
+                    "url": "https://hardcover.app/books/the-unconsoled",
+                    "name": "Goodreads Book"
+                }
+            ],
+            "ratings": {
+                "votes": 36,
+                "value": 3.55555555555556,
+                "popularity": 128.00000000000014
+            },
+            "monitored": true,
+            "manualAdd": false,
+            "grabbed": false
+        }
+    ],
+    "grabbed": false,
+    "addOptions": {
+        "addType": "automatic",
+        "searchForNewBook": true
+    }
+}
