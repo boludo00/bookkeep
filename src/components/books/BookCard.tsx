@@ -13,6 +13,7 @@ interface BookCardProps {
   status?: 'available' | 'requested' | 'none';
   showRating?: boolean;
   enableRequestStatus?: boolean;
+  showRequestButton?: boolean;
 }
 
 export function BookCard({
@@ -20,6 +21,7 @@ export function BookCard({
   status = 'none',
   showRating = true,
   enableRequestStatus = false,
+  showRequestButton = true,
 }: BookCardProps) {
   const [requestOpen, setRequestOpen] = useState(false);
   const { data: existingRequests } = useQuery({
@@ -109,7 +111,7 @@ export function BookCard({
           </div>
         </Link>
 
-        {!isAnyFormatAvailable && (
+        {!isAnyFormatAvailable && showRequestButton && (
           <div className="absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
             <Button
               size="sm"
@@ -126,7 +128,7 @@ export function BookCard({
           </div>
         )}
       </div>
-      {book.hardcoverId && (
+      {book.hardcoverId && showRequestButton && (
         <RequestDialog book={book} open={requestOpen} onOpenChange={setRequestOpen} />
       )}
     </>

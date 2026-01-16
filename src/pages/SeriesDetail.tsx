@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, BookOpen, Download, Loader2, Trash2, RefreshCw } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getSeriesBooks, normalizeSeriesBooks, rebuildSeries } from '@/lib/hardcover';
-import { requestsApi } from '@/lib/api';
+import { requestsApi, readarrApi } from '@/lib/api';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -24,6 +24,7 @@ export default function SeriesDetail() {
     queryKey: ['series', id],
     queryFn: () => getSeriesBooks(Number(id)),
     enabled: !!id && !isNaN(Number(id)),
+    staleTime: 7 * 24 * 60 * 60 * 1000,
   });
 
   const series = seriesData?.series_by_pk;
@@ -45,9 +46,40 @@ export default function SeriesDetail() {
   const allGenres = books.flatMap(book => book.genres || []);
   const uniqueGenres = [...new Set(allGenres)].slice(0, 5);
 
+  const hardcoverIds = books
+    .map((book) => book.hardcoverId ?? Number(book.id))
+    .filter((bookId): bookId is number => Number.isFinite(bookId))
+    .map((bookId) => Number(bookId));
+
+  const { data: readarrAvailability } = useQuery({
+    queryKey: ['readarr', 'availability', 'series', id, hardcoverIds],
+    queryFn: () => readarrApi.getAvailabilityBatch(hardcoverIds),
+    enabled: hardcoverIds.length > 0,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const availabilityMap = new Map(
+    readarrAvailability?.results.map((item) => [item.hardcover_id, item]) ?? []
+  );
+
+  const booksWithAvailability = books.map((book) => {
+    const hardcoverId = book.hardcoverId ?? Number(book.id);
+    const match = Number.isFinite(hardcoverId) ? availabilityMap.get(Number(hardcoverId)) : undefined;
+    if (!match) {
+      return book;
+    }
+    return {
+      ...book,
+      ebookAvailable: book.ebookAvailable || match.ebook,
+      audiobookAvailable: book.audiobookAvailable || match.audiobook,
+    };
+  });
+
   // Count available/requested books
-  const availableCount = books.filter(b => b.ebookAvailable || b.audiobookAvailable).length;
-  const missingCount = books.length - availableCount;
+  const availableCount = booksWithAvailability.filter(
+    (b) => b.ebookAvailable || b.audiobookAvailable
+  ).length;
+  const missingCount = booksWithAvailability.length - availableCount;
 
   // Request series mutation
   const requestSeriesMutation = useMutation({
@@ -100,7 +132,7 @@ export default function SeriesDetail() {
   });
 
   // Check if there are any requests to clear (books that are requested but not available)
-  const requestedCount = books.filter(b => {
+  const requestedCount = booksWithAvailability.filter(b => {
     const isAvailable = b.ebookAvailable || b.audiobookAvailable;
     return !isAvailable; // Could have requests if not available
   }).length - missingCount; // Approximation - actual count would need API call
@@ -282,8 +314,8 @@ export default function SeriesDetail() {
         <section>
           <h2 className="text-xl font-bold text-foreground mb-4">Books</h2>
           <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide -mx-4 px-4">
-            {books.map((book, index) => (
-              <div key={book.id} className="flex-shrink-0 w-[140px] sm:w-[160px] relative">
+              {booksWithAvailability.map((book, index) => (
+                <div key={book.id} className="flex-shrink-0 w-[140px] sm:w-[160px] relative">
                 {/* Position Badge */}
                 {((book as any).position ?? book.seriesPosition) != null && (
                   <div className="absolute -top-2 -left-2 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold shadow-lg">

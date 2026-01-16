@@ -7,7 +7,12 @@ from app import database, models, schemas
 from app.cache import get_cached, set_cached, delete_cached, make_cache_key, CACHE_TTL
 from app.auth import get_current_user, require_admin
 from app.routers.readarr import add_book_to_readarr
-from app.services.readarr_service import ReadarrClient, get_readarr_server_for_format
+from app.services.readarr_service import (
+    ReadarrClient,
+    get_readarr_server_for_format,
+    is_format_available_in_readarr,
+    get_readarr_availability_map,
+)
 from app.routers.users import get_password_hash
 
 logger = structlog.get_logger(__name__)
@@ -51,6 +56,18 @@ async def create_request(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"You do not have permission to request {request.format}s"
         )
+
+    # Block requests for formats already available in Readarr
+    try:
+        if book.hardcover_id and await is_format_available_in_readarr(db, book.hardcover_id, request.format):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"{request.format.capitalize()} already available in Readarr."
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning("readarr_availability_check_failed", error=str(e))
 
     # Check if this book+format already has a request (global - any user)
     # Only allow new requests if existing ones are denied or don't exist
@@ -419,10 +436,23 @@ async def request_series(
     skipped_count = 0
     already_available = 0
     already_requested = 0
+
+    availability_map = {}
+    hardcover_ids = [book.hardcover_id for book in books_in_series if book.hardcover_id]
+    if hardcover_ids:
+        try:
+            availability_map = await get_readarr_availability_map(db, hardcover_ids)
+        except Exception as e:
+            logger.warning("series_readarr_availability_failed", error=str(e))
     
     for book in books_in_series:
-        # Check if book is already available for this format
-        if format == "ebook" and book.ebook_available:
+        # Check if book is already available for this format (Readarr preferred)
+        readarr_availability = availability_map.get(book.hardcover_id or 0, {})
+        readarr_has_format = (
+            (format == "ebook" and readarr_availability.get("ebook"))
+            or (format == "audiobook" and readarr_availability.get("audiobook"))
+        )
+        if readarr_has_format or (format == "ebook" and book.ebook_available):
             already_available += 1
             skipped_count += 1
             continue

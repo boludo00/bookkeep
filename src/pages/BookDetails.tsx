@@ -448,7 +448,7 @@ export default function BookDetails() {
                             key={promptBook.id}
                             className="flex-shrink-0 w-[140px] sm:w-[160px]"
                           >
-                            <BookCard book={promptBook} showRating={false} />
+                            <BookCard book={promptBook} showRating={false} showRequestButton={false} />
                           </div>
                         ))}
                       </div>

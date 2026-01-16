@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
 from app import models
+from app.cache import get_cached, set_cached, make_cache_key, CACHE_TTL
 
 logger = structlog.get_logger(__name__)
 
@@ -1362,3 +1363,79 @@ def get_readarr_server_for_format(
         if server:
             return server
     return None
+
+
+async def _get_cached_library(server: models.ReadarrServer) -> List[Dict[str, Any]]:
+    cache_key = make_cache_key("readarr_library", server_id=server.id)
+    cached = await get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    readarr_client = ReadarrClient.from_server(server)
+    async with readarr_client.session(timeout=15.0) as client:
+        books = await readarr_client.get_library_books(client)
+    await set_cached(cache_key, books, ttl=CACHE_TTL.get("readarr_library", 60))
+    return books
+
+
+def _availability_from_books(books: List[Dict[str, Any]]) -> Dict[int, bool]:
+    availability: Dict[int, bool] = {}
+    for book in books:
+        foreign_id = book.get("foreignBookId")
+        if foreign_id is None:
+            continue
+        try:
+            hardcover_id = int(foreign_id)
+        except (TypeError, ValueError):
+            continue
+        if book.get("statistics", {}).get("bookFileCount", 0) > 0:
+            availability[hardcover_id] = True
+    return availability
+
+
+async def get_readarr_availability_map(
+    db: Session,
+    hardcover_ids: List[int],
+) -> Dict[int, Dict[str, bool]]:
+    unique_ids = {int(book_id) for book_id in hardcover_ids if book_id is not None}
+    result = {hardcover_id: {"ebook": False, "audiobook": False} for hardcover_id in unique_ids}
+    if not result:
+        return {}
+
+    ebook_server = db.query(models.ReadarrServer).filter(
+        models.ReadarrServer.is_audiobook == False
+    ).first()
+    if ebook_server:
+        books = await _get_cached_library(ebook_server)
+        ebook_available = _availability_from_books(books)
+        for hardcover_id in result:
+            if ebook_available.get(hardcover_id):
+                result[hardcover_id]["ebook"] = True
+
+    audiobook_server = db.query(models.ReadarrServer).filter(
+        models.ReadarrServer.is_audiobook == True
+    ).first()
+    if audiobook_server:
+        books = await _get_cached_library(audiobook_server)
+        audiobook_available = _availability_from_books(books)
+        for hardcover_id in result:
+            if audiobook_available.get(hardcover_id):
+                result[hardcover_id]["audiobook"] = True
+
+    return result
+
+
+async def is_format_available_in_readarr(
+    db: Session,
+    hardcover_id: int,
+    format: str,
+) -> bool:
+    availability = await get_readarr_availability_map(db, [hardcover_id])
+    item = availability.get(int(hardcover_id))
+    if not item:
+        return False
+    if format == "ebook":
+        return bool(item.get("ebook"))
+    if format == "audiobook":
+        return bool(item.get("audiobook"))
+    return False

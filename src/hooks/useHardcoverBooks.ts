@@ -62,7 +62,8 @@ export function useTrendingBooks(limit: number = 12) {
       const books = transformBooks(data.books || []);
       return enrichAvailability(books);
     },
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    staleTime: 24 * 60 * 60 * 1000,
+    gcTime: 24 * 60 * 60 * 1000,
   });
 }
 
@@ -74,7 +75,8 @@ export function usePopularBooks(limit: number = 12) {
       const books = transformBooks(data.books || []);
       return enrichAvailability(books);
     },
-    staleTime: 5 * 60 * 1000,
+    staleTime: 24 * 60 * 60 * 1000,
+    gcTime: 24 * 60 * 60 * 1000,
   });
 }
 
@@ -86,7 +88,8 @@ export function useNewReleases(limit: number = 12) {
       const books = transformBooks(data.books || []);
       return enrichAvailability(books);
     },
-    staleTime: 5 * 60 * 1000,
+    staleTime: 24 * 60 * 60 * 1000,
+    gcTime: 24 * 60 * 60 * 1000,
   });
 }
 
@@ -129,6 +132,7 @@ export function useBookPrompts(
       return data.prompt_summaries || [];
     },
     enabled: Number.isFinite(bookId),
-    staleTime: 5 * 60 * 1000,
+    staleTime: Infinity,
+    gcTime: 24 * 60 * 60 * 1000,
   });
 }
