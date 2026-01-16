@@ -62,7 +62,7 @@ COPY backend/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
 # Set PYTHONPATH to include backend directory so imports work correctly
-ENV PYTHONPATH="/app/backend:$PYTHONPATH"
+ENV PYTHONPATH="/app/backend"
 
 # Expose port
 EXPOSE 8000
