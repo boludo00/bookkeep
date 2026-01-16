@@ -1,7 +1,6 @@
 import { BookRow } from '@/components/books/BookRow';
 import { BookRowSkeleton } from '@/components/books/BookRowSkeleton';
 import { RequestsRow } from '@/components/books/RequestsRow';
-import { mockRequests } from '@/data/mockBooks';
 import { useTrendingBooks, usePopularBooks, useNewReleases } from '@/hooks/useHardcoverBooks';
 import { useQuery } from '@tanstack/react-query';
 import { requestsApi, settingsApi } from '@/lib/api';

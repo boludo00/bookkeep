@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Search, User, Settings, Clock, LogOut, AlertTriangle, Menu } from 'lucide-react';
+import { Search, User, Settings, Clock, LogOut, Menu } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -49,7 +49,7 @@ export function Header({ onMenuClick }: HeaderProps) {
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [showResults, setShowResults] = useState(false);
   const navigate = useNavigate();
-  const { user, isAdmin, logout, isMockMode } = useUser();
+  const { user, isAdmin, logout } = useUser();
 
   useEffect(() => {
     const trimmed = searchQuery.trim();
@@ -91,12 +91,6 @@ export function Header({ onMenuClick }: HeaderProps) {
 
   return (
     <header className="fixed top-0 left-0 right-0 md:left-64 z-30 bg-background/80 backdrop-blur-xl border-b border-border">
-      {isMockMode && (
-        <div className="bg-muted text-muted-foreground px-4 py-1.5 text-center text-sm font-medium flex items-center justify-center gap-2">
-          <AlertTriangle className="h-4 w-4" />
-          Mock Mode – Backend unavailable. Using sample data for UI development.
-        </div>
-      )}
       <div className="flex flex-wrap items-center gap-3 px-4 py-3 sm:px-6 sm:py-0 sm:h-16 sm:gap-4">
         <button
           type="button"
