@@ -75,6 +75,7 @@ export function RequestDialog({
   const [errorSummary, setErrorSummary] = useState('');
   const [errorDetails, setErrorDetails] = useState('');
   const [showErrorDetails, setShowErrorDetails] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const queryClient = useQueryClient();
 
   // Fetch configured formats
@@ -227,10 +228,7 @@ export function RequestDialog({
     const currentNotes = notes;
     const currentFormat = selectedFormat;
     const toastId = `request-${book.hardcoverId}-${currentFormat}`;
-    
-    // Close dialog immediately for instant feedback
-    setNotes('');
-    onOpenChange(false);
+    setIsSubmitting(true);
     
     // Show pending toast
     toast.loading(`Submitting ${formatLabel} request...`, {
@@ -282,6 +280,8 @@ export function RequestDialog({
             ? confirmations.join(' • ')
             : `Your ${formatLabel} request for "${book.title}" has been sent.`,
         });
+        setNotes('');
+        onOpenChange(false);
       } catch (error: any) {
         console.error('Request submission error:', error);
         toast.dismiss(toastId);
@@ -294,6 +294,8 @@ export function RequestDialog({
         setErrorDetails(rawMessage);
         setShowErrorDetails(false);
         setErrorDialogOpen(true);
+      } finally {
+        setIsSubmitting(false);
       }
     })();
   };
@@ -543,16 +545,24 @@ export function RequestDialog({
             variant="outline"
             onClick={() => onOpenChange(false)}
             className="border-border"
+            disabled={isSubmitting}
           >
             {noFormatsAvailable ? 'Close' : 'Cancel'}
           </Button>
           {!noFormatsAvailable && !isLoading && (
             <Button
               onClick={handleSubmit}
-              disabled={!selectedFormat}
+              disabled={!selectedFormat || isSubmitting}
               className="bg-primary hover:bg-primary/90"
             >
-              Submit Request
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Submitting...
+                </>
+              ) : (
+                'Submit Request'
+              )}
             </Button>
           )}
         </div>
