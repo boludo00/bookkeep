@@ -31,7 +31,16 @@ async function enrichAvailability(books: Book[]): Promise<Book[]> {
   }
 
   try {
-    const availability = await readarrApi.getAvailabilityBatch(ids);
+    const isbnMap: Record<number, string[]> = {};
+    books.forEach((book) => {
+      const hardcoverId = book.hardcoverId ?? Number(book.id);
+      if (!Number.isFinite(hardcoverId) || !book.isbn) {
+        return;
+      }
+      isbnMap[Number(hardcoverId)] = [book.isbn];
+    });
+
+    const availability = await readarrApi.getAvailabilityBatch(ids, isbnMap);
     const availabilityMap = new Map(
       availability.results.map((item) => [item.hardcover_id, item])
     );

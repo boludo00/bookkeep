@@ -1378,36 +1378,78 @@ async def _get_cached_library(server: models.ReadarrServer) -> List[Dict[str, An
     return books
 
 
-def _availability_from_books(books: List[Dict[str, Any]]) -> Dict[int, bool]:
+def _normalize_isbn(value: str) -> str:
+    return "".join(ch for ch in value.upper() if ch.isalnum())
+
+
+def _availability_from_books(
+    books: List[Dict[str, Any]],
+    isbn_lookup: Optional[Dict[str, int]] = None,
+) -> Dict[int, bool]:
     availability: Dict[int, bool] = {}
     for book in books:
         foreign_id = book.get("foreignBookId")
         if foreign_id is None:
+            hardcover_id = None
+        else:
+            try:
+                hardcover_id = int(foreign_id)
+            except (TypeError, ValueError):
+                hardcover_id = None
+        has_file = book.get("statistics", {}).get("bookFileCount", 0) > 0
+        if not has_file:
             continue
-        try:
-            hardcover_id = int(foreign_id)
-        except (TypeError, ValueError):
-            continue
-        if book.get("statistics", {}).get("bookFileCount", 0) > 0:
+        if hardcover_id is not None:
             availability[hardcover_id] = True
+            continue
+        if not isbn_lookup:
+            continue
+        isbn_values: List[str] = []
+        for key in ["isbn", "isbn13", "isbn10"]:
+            value = book.get(key)
+            if not value:
+                continue
+            if isinstance(value, list):
+                isbn_values.extend([str(item) for item in value if item])
+            else:
+                isbn_values.append(str(value))
+        for raw_isbn in isbn_values:
+            normalized = _normalize_isbn(raw_isbn)
+            if not normalized:
+                continue
+            matched_id = isbn_lookup.get(normalized)
+            if matched_id is not None:
+                availability[matched_id] = True
+                break
     return availability
 
 
 async def get_readarr_availability_map(
     db: Session,
     hardcover_ids: List[int],
+    isbn_map: Optional[Dict[int, List[str]]] = None,
 ) -> Dict[int, Dict[str, bool]]:
     unique_ids = {int(book_id) for book_id in hardcover_ids if book_id is not None}
     result = {hardcover_id: {"ebook": False, "audiobook": False} for hardcover_id in unique_ids}
     if not result:
         return {}
 
+    isbn_lookup: Dict[str, int] = {}
+    if isbn_map:
+        for hardcover_id, values in isbn_map.items():
+            if not values:
+                continue
+            for raw_isbn in values:
+                normalized = _normalize_isbn(str(raw_isbn))
+                if normalized:
+                    isbn_lookup[normalized] = int(hardcover_id)
+
     ebook_server = db.query(models.ReadarrServer).filter(
         models.ReadarrServer.is_audiobook == False
     ).first()
     if ebook_server:
         books = await _get_cached_library(ebook_server)
-        ebook_available = _availability_from_books(books)
+        ebook_available = _availability_from_books(books, isbn_lookup)
         for hardcover_id in result:
             if ebook_available.get(hardcover_id):
                 result[hardcover_id]["ebook"] = True
@@ -1417,7 +1459,7 @@ async def get_readarr_availability_map(
     ).first()
     if audiobook_server:
         books = await _get_cached_library(audiobook_server)
-        audiobook_available = _availability_from_books(books)
+        audiobook_available = _availability_from_books(books, isbn_lookup)
         for hardcover_id in result:
             if audiobook_available.get(hardcover_id):
                 result[hardcover_id]["audiobook"] = True
@@ -1429,8 +1471,10 @@ async def is_format_available_in_readarr(
     db: Session,
     hardcover_id: int,
     format: str,
+    isbns: Optional[List[str]] = None,
 ) -> bool:
-    availability = await get_readarr_availability_map(db, [hardcover_id])
+    isbn_map = {int(hardcover_id): isbns} if isbns else None
+    availability = await get_readarr_availability_map(db, [hardcover_id], isbn_map=isbn_map)
     item = availability.get(int(hardcover_id))
     if not item:
         return False

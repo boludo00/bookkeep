@@ -29,6 +29,7 @@ CACHE_TTL = {
     "search_grouped": 1800, # 30 minutes
     "readarr_library": 600, # 10 minutes
     "requests_by_hardcover": 300, # 5 minutes
+    "requests_by_hardcover_batch": 300, # 5 minutes
 }
 
 # Initialize cache - try Redis first, fallback to memory

@@ -424,6 +424,7 @@ class ReadarrTestConnectionResponse(BaseModel):
 
 class ReadarrAvailabilityBatchRequest(BaseModel):
     hardcover_ids: List[int]
+    isbn_map: Optional[dict[int, List[str]]] = None
 
 class ReadarrAvailabilityItem(BaseModel):
     hardcover_id: int

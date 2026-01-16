@@ -289,6 +289,15 @@ export const requestsApi = {
       `/api/requests/by-hardcover/${hardcoverId}${format ? `?format=${format}` : ''}`,
       { method: 'DELETE' }
     ),
+
+  getByHardcoverBatch: (hardcoverIds: number[]) =>
+    apiRequest<{ results: Array<{ hardcover_id: number; ebook: string | null; audiobook: string | null }> }>(
+      '/api/requests/by-hardcover/batch',
+      {
+        method: 'POST',
+        body: JSON.stringify({ hardcover_ids: hardcoverIds }),
+      }
+    ),
   
   requestSeries: (seriesId: number, format: 'ebook' | 'audiobook' = 'ebook') =>
     apiRequest<{
@@ -424,12 +433,12 @@ export const readarrApi = {
   getAvailability: (hardcoverId: number) =>
     apiRequest<{ ebook: boolean; audiobook: boolean }>(`/api/readarr/availability/${hardcoverId}`),
 
-  getAvailabilityBatch: (hardcoverIds: number[]) =>
+  getAvailabilityBatch: (hardcoverIds: number[], isbnMap?: Record<number, string[]>) =>
     apiRequest<{ results: Array<{ hardcover_id: number; ebook: boolean; audiobook: boolean }> }>(
       '/api/readarr/availability/batch',
       {
         method: 'POST',
-        body: JSON.stringify({ hardcover_ids: hardcoverIds }),
+        body: JSON.stringify({ hardcover_ids: hardcoverIds, isbn_map: isbnMap }),
       }
     ),
 

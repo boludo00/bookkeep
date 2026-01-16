@@ -51,15 +51,35 @@ export default function SeriesDetail() {
     .filter((bookId): bookId is number => Number.isFinite(bookId))
     .map((bookId) => Number(bookId));
 
+  const isbnMap = books.reduce<Record<number, string[]>>((acc, book) => {
+    const hardcoverId = book.hardcoverId ?? Number(book.id);
+    if (!Number.isFinite(hardcoverId) || !book.isbn) {
+      return acc;
+    }
+    acc[Number(hardcoverId)] = [book.isbn];
+    return acc;
+  }, {});
+
   const { data: readarrAvailability } = useQuery({
     queryKey: ['readarr', 'availability', 'series', id, hardcoverIds],
-    queryFn: () => readarrApi.getAvailabilityBatch(hardcoverIds),
+    queryFn: () => readarrApi.getAvailabilityBatch(hardcoverIds, isbnMap),
+    enabled: hardcoverIds.length > 0,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const { data: requestStatuses } = useQuery({
+    queryKey: ['requests', 'by-hardcover', 'series', id, hardcoverIds],
+    queryFn: () => requestsApi.getByHardcoverBatch(hardcoverIds),
     enabled: hardcoverIds.length > 0,
     staleTime: 5 * 60 * 1000,
   });
 
   const availabilityMap = new Map(
     readarrAvailability?.results.map((item) => [item.hardcover_id, item]) ?? []
+  );
+
+  const requestStatusMap = new Map(
+    requestStatuses?.results.map((item) => [item.hardcover_id, item]) ?? []
   );
 
   const booksWithAvailability = books.map((book) => {
@@ -322,7 +342,10 @@ export default function SeriesDetail() {
                     {(book as any).position ?? book.seriesPosition}
                   </div>
                 )}
-                <BookCard book={book} />
+                <BookCard
+                  book={book}
+                  requestStatus={requestStatusMap.get((book.hardcoverId ?? Number(book.id)) as number)}
+                />
               </div>
             ))}
           </div>

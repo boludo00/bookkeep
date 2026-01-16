@@ -250,7 +250,7 @@ async def check_books_availability_batch(
     if not hardcover_ids:
         return schemas.ReadarrAvailabilityBatchResponse(results=[])
 
-    result_map = await get_readarr_availability_map(db, hardcover_ids)
+    result_map = await get_readarr_availability_map(db, hardcover_ids, isbn_map=payload.isbn_map)
 
     results = [
         schemas.ReadarrAvailabilityItem(
