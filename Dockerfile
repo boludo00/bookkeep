@@ -3,6 +3,10 @@ FROM node:20-slim AS frontend-builder
 
 WORKDIR /app/frontend
 
+# Build metadata (forwarded to Vite)
+ARG APP_VERSION=dev
+ENV VITE_APP_VERSION=$APP_VERSION
+
 # Copy only dependency files first for better layer caching
 COPY package*.json ./
 
@@ -65,4 +69,3 @@ EXPOSE 8000
 
 # Use entrypoint script to run migrations then start the app
 ENTRYPOINT ["/app/entrypoint.sh"]
-

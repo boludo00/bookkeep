@@ -19,6 +19,8 @@ export function Sidebar() {
   const location = useLocation();
   const { isAdmin } = useUser();
   
+  const appVersion = import.meta.env.VITE_APP_VERSION || 'dev';
+
   return (
     <aside className="fixed left-0 top-0 z-40 h-screen w-64 bg-sidebar-background border-r border-sidebar-border flex flex-col">
       {/* Logo */}
@@ -97,7 +99,7 @@ export function Sidebar() {
       {/* Footer */}
       <div className="border-t border-sidebar-border px-4 py-4">
         <p className="text-xs text-sidebar-muted">
-          Bookkeep v1.0.0
+          Bookkeep {appVersion}
         </p>
       </div>
     </aside>
