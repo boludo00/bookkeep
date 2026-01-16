@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Search, User, Settings, Clock, LogOut, AlertTriangle } from 'lucide-react';
+import { Search, User, Settings, Clock, LogOut, AlertTriangle, Menu } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -40,7 +40,11 @@ function getAvatarColor(username: string): string {
   return colors[hash % colors.length];
 }
 
-export function Header() {
+interface HeaderProps {
+  onMenuClick?: () => void;
+}
+
+export function Header({ onMenuClick }: HeaderProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [showResults, setShowResults] = useState(false);
@@ -86,16 +90,27 @@ export function Header() {
   const avatarColor = user ? getAvatarColor(user.username) : 'bg-secondary';
 
   return (
-    <header className="fixed top-0 left-64 right-0 z-30 bg-background/80 backdrop-blur-xl border-b border-border">
+    <header className="fixed top-0 left-0 right-0 md:left-64 z-30 bg-background/80 backdrop-blur-xl border-b border-border">
       {isMockMode && (
         <div className="bg-muted text-muted-foreground px-4 py-1.5 text-center text-sm font-medium flex items-center justify-center gap-2">
           <AlertTriangle className="h-4 w-4" />
           Mock Mode – Backend unavailable. Using sample data for UI development.
         </div>
       )}
-      <div className="flex h-16 items-center justify-between px-6">
+      <div className="flex flex-wrap items-center gap-3 px-4 py-3 sm:px-6 sm:py-0 sm:h-16 sm:gap-4">
+        <button
+          type="button"
+          onClick={onMenuClick}
+          className="order-1 inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border text-sidebar-foreground hover:bg-accent/50 md:hidden"
+          aria-label="Open navigation"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
         {/* Search */}
-        <form onSubmit={handleSearch} className="relative w-full max-w-xl flex gap-2">
+        <form
+          onSubmit={handleSearch}
+          className="order-3 w-full flex gap-2 sm:order-2 sm:w-auto sm:flex-1"
+        >
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -120,7 +135,7 @@ export function Header() {
           <Button
             type="submit"
             variant="default"
-            className="px-6"
+            className="px-4 sm:px-6"
             disabled={!searchQuery.trim()}
           >
             Search
@@ -130,7 +145,7 @@ export function Header() {
         {/* User Dropdown */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="flex items-center gap-2 rounded-full focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background">
+            <button className="order-2 ml-auto flex items-center gap-2 rounded-full focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background sm:order-3">
               <Avatar className={`h-9 w-9 border-2 border-primary cursor-pointer ${avatarColor}`}>
                 <AvatarFallback className="text-white font-semibold bg-transparent">
                   {user ? getInitials(user.full_name, user.username) : <User className="h-4 w-4" />}
