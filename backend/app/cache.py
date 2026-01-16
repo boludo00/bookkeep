@@ -17,14 +17,14 @@ REDIS_URL = os.getenv("REDIS_URL", "")
 # Cache TTLs (in seconds)
 CACHE_TTL = {
     "trending": 86400,     # 24 hours
-    "popular": 21600,      # 6 hours
+    "popular": 86400,      # 24 hours
     "new_releases": 86400, # 24 hours
     "search": 1800,        # 30 minutes
     "book_details": 86400, # 24 hours
-    "series": 86400,       # 24 hours
+    "series": 604800,      # 7 days
     "popular_series": 86400, # 24 hours
     "similar_books": 604800, # 7 days - recommendations don't change often
-    "book_prompts": 86400, # 24 hours - prompt summaries are stable
+    "book_prompts": None, # never expire - prompt summaries are stable
     "author": 86400, # 24 hours
     "search_grouped": 1800, # 30 minutes
     "readarr_library": 60, # 1 minute

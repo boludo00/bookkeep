@@ -12,9 +12,15 @@ interface BookCardProps {
   book: Book;
   status?: 'available' | 'requested' | 'none';
   showRating?: boolean;
+  enableRequestStatus?: boolean;
 }
 
-export function BookCard({ book, status = 'none', showRating = true }: BookCardProps) {
+export function BookCard({
+  book,
+  status = 'none',
+  showRating = true,
+  enableRequestStatus = false,
+}: BookCardProps) {
   const [requestOpen, setRequestOpen] = useState(false);
   const { data: existingRequests } = useQuery({
     queryKey: ['book-requests', book.hardcoverId],
@@ -22,18 +28,18 @@ export function BookCard({ book, status = 'none', showRating = true }: BookCardP
       book.hardcoverId
         ? requestsApi.getByHardcoverId(book.hardcoverId)
         : Promise.resolve({ ebook: null, audiobook: null, book_id: null }),
-    enabled: !!book.hardcoverId,
+    enabled: enableRequestStatus && !!book.hardcoverId,
     staleTime: 60 * 1000,
   });
   const ebookAvailable = book.ebookAvailable || false;
   const audiobookAvailable = book.audiobookAvailable || false;
   const isAnyFormatAvailable = ebookAvailable || audiobookAvailable;
-  const requestStatuses = [existingRequests?.ebook, existingRequests?.audiobook].filter(
-    (value): value is string => !!value
-  );
-  const hasActiveRequest = requestStatuses.some(
-    (value) => value !== 'not_found' && value !== 'available'
-  );
+  const requestStatuses = enableRequestStatus
+    ? [existingRequests?.ebook, existingRequests?.audiobook].filter((value): value is string => !!value)
+    : [];
+  const hasActiveRequest = enableRequestStatus
+    ? requestStatuses.some((value) => value !== 'not_found' && value !== 'available')
+    : false;
   const effectiveStatus = status !== 'none' ? status : hasActiveRequest ? 'requested' : 'none';
   const bookLink = book.seriesId
     ? `/book/${book.id}?seriesId=${book.seriesId}`

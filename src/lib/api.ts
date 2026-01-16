@@ -238,43 +238,6 @@ export const booksApi = {
       method: 'DELETE',
     }),
   
-  refreshAvailability: (bookId: number) =>
-    apiRequest<{
-      book_id: number;
-      title: string;
-      ebook_available: boolean;
-      audiobook_available: boolean;
-      checked_sources: string[];
-    }>(`/api/books/${bookId}/refresh`, {
-      method: 'POST',
-    }),
-  
-  refreshByHardcoverId: (hardcoverId: number) =>
-    apiRequest<{
-      book_id: number;
-      title: string;
-      ebook_available: boolean;
-      audiobook_available: boolean;
-      checked_sources: string[];
-    }>(`/api/books/by-hardcover/${hardcoverId}/refresh`, {
-      method: 'POST',
-    }),
-  
-  refreshSeriesAvailability: (seriesId: number) =>
-    apiRequest<{
-      series_id: number;
-      total_books: number;
-      ebooks_available: number;
-      audiobooks_available: number;
-      books: Array<{
-        book_id: number;
-        title: string;
-        ebook_available: boolean;
-        audiobook_available: boolean;
-      }>;
-    }>(`/api/books/series/${seriesId}/refresh`, {
-      method: 'POST',
-    }),
 };
 
 // Requests API endpoints
