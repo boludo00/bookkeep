@@ -309,9 +309,19 @@ async def get_requests_for_hardcover_book(
     ).all()
     
     # Build a response with format status
-    result = {"ebook": None, "audiobook": None, "book_id": book.id}
+    result = {
+        "ebook": None,
+        "audiobook": None,
+        "ebook_readarr_book_id": None,
+        "audiobook_readarr_book_id": None,
+        "book_id": book.id,
+    }
     for r in requests:
         result[r.format] = r.status
+        if r.format == "ebook":
+            result["ebook_readarr_book_id"] = r.readarr_book_id
+        elif r.format == "audiobook":
+            result["audiobook_readarr_book_id"] = r.readarr_book_id
     
     logger.debug("requests_for_hardcover_book", 
                 hardcover_id=hardcover_id, 

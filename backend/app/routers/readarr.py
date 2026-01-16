@@ -157,6 +157,52 @@ async def check_book_availability_by_format(
     return result
 
 
+@router.get("/availability/readarr/{readarr_book_id}")
+async def check_readarr_book_availability(
+    readarr_book_id: int,
+    format: str = Query(..., description="Format to check: 'ebook' or 'audiobook'"),
+    db: Session = Depends(database.get_db),
+):
+    """Check if a specific Readarr book has files."""
+    if format not in ["ebook", "audiobook"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Format must be 'ebook' or 'audiobook'",
+        )
+
+    server = get_readarr_server_for_format(format, db)
+    if not server:
+        return {"available": False, "readarr_book_id": readarr_book_id, "format": format}
+
+    readarr_client = ReadarrClient.from_server(server)
+    try:
+        response = await readarr_client._get(None, f"/book/{readarr_book_id}")
+        if response.status_code == 200:
+            book_data = response.json()
+            statistics = book_data.get("statistics", {})
+            book_file_count = statistics.get("bookFileCount", 0)
+            size_on_disk = statistics.get("sizeOnDisk", 0)
+            available = book_file_count > 0 or size_on_disk > 0
+            return {
+                "available": available,
+                "readarr_book_id": readarr_book_id,
+                "format": format,
+            }
+        if response.status_code == 404:
+            logger.info("readarr_book_not_found", readarr_book_id=readarr_book_id)
+        else:
+            logger.warning(
+                "readarr_book_fetch_failed",
+                readarr_book_id=readarr_book_id,
+                status_code=response.status_code,
+                response_text=response.text[:200],
+            )
+    except Exception as e:
+        logger.warning("readarr_book_fetch_error", readarr_book_id=readarr_book_id, error=str(e))
+
+    return {"available": False, "readarr_book_id": readarr_book_id, "format": format}
+
+
 @router.get("/manage-link/{hardcover_id}")
 async def get_readarr_manage_link(
     hardcover_id: int,

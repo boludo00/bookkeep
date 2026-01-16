@@ -276,7 +276,13 @@ export const requestsApi = {
     apiRequest<{ ebook: string | null; audiobook: string | null }>(`/api/requests/by-book/${bookId}`),
   
   getByHardcoverId: (hardcoverId: number) =>
-    apiRequest<{ ebook: string | null; audiobook: string | null; book_id: number | null }>(`/api/requests/by-hardcover/${hardcoverId}`),
+    apiRequest<{
+      ebook: string | null;
+      audiobook: string | null;
+      ebook_readarr_book_id: number | null;
+      audiobook_readarr_book_id: number | null;
+      book_id: number | null;
+    }>(`/api/requests/by-hardcover/${hardcoverId}`),
   
   clearByHardcoverId: (hardcoverId: number, format?: 'ebook' | 'audiobook') =>
     apiRequest<{ message: string; deleted_count: number; formats: string[] }>(
@@ -425,6 +431,11 @@ export const readarrApi = {
         method: 'POST',
         body: JSON.stringify({ hardcover_ids: hardcoverIds }),
       }
+    ),
+
+  getAvailabilityByReadarrId: (readarrBookId: number, format: 'ebook' | 'audiobook') =>
+    apiRequest<{ available: boolean; readarr_book_id: number; format: string }>(
+      `/api/readarr/availability/readarr/${readarrBookId}?format=${format}`
     ),
 
   getManageLink: (hardcoverId: number, format?: 'ebook' | 'audiobook') =>
