@@ -5,6 +5,7 @@ from typing import List, Optional, Dict, Any
 import httpx
 import structlog
 from app import database, models, schemas
+from app.cache import get_cached, set_cached, make_cache_key, CACHE_TTL
 from app.services.readarr_service import (
     ReadarrClient,
     ReadarrService,
@@ -15,6 +16,19 @@ from app.services.readarr_service import (
 logger = structlog.get_logger(__name__)
 
 router = APIRouter()
+
+
+async def _get_cached_library(server: models.ReadarrServer) -> List[Dict[str, Any]]:
+    cache_key = make_cache_key("readarr_library", server_id=server.id)
+    cached = await get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    readarr_client = ReadarrClient.from_server(server)
+    async with readarr_client.session(timeout=15.0) as client:
+        books = await readarr_client.get_library_books(client)
+    await set_cached(cache_key, books, ttl=CACHE_TTL.get("readarr_library", 60))
+    return books
 
 async def test_readarr_connection(
     hostname: str,
@@ -153,14 +167,19 @@ async def check_book_availability_by_format(
     ).first()
     
     if ebook_server:
-        readarr_client = ReadarrClient.from_server(ebook_server)
-        book = await readarr_client.find_book_in_library(None, hardcover_id)
-        if book and book.get("statistics", {}).get("bookFileCount", 0) > 0:
-            result["ebook"] = True
-            logger.debug("ebook_available_in_readarr", 
+        books = await _get_cached_library(ebook_server)
+        for book in books:
+            foreign_id = book.get("foreignBookId")
+            if foreign_id and str(foreign_id) == str(hardcover_id):
+                if book.get("statistics", {}).get("bookFileCount", 0) > 0:
+                    result["ebook"] = True
+                    logger.debug(
+                        "ebook_available_in_readarr",
                         hardcover_id=hardcover_id,
                         book_id=book.get("id"),
-                        file_count=book.get("statistics", {}).get("bookFileCount", 0))
+                        file_count=book.get("statistics", {}).get("bookFileCount", 0),
+                    )
+                break
     
     # Check audiobook server
     audiobook_server = db.query(models.ReadarrServer).filter(
@@ -168,14 +187,19 @@ async def check_book_availability_by_format(
     ).first()
     
     if audiobook_server:
-        readarr_client = ReadarrClient.from_server(audiobook_server)
-        book = await readarr_client.find_book_in_library(None, hardcover_id)
-        if book and book.get("statistics", {}).get("bookFileCount", 0) > 0:
-            result["audiobook"] = True
-            logger.debug("audiobook_available_in_readarr",
+        books = await _get_cached_library(audiobook_server)
+        for book in books:
+            foreign_id = book.get("foreignBookId")
+            if foreign_id and str(foreign_id) == str(hardcover_id):
+                if book.get("statistics", {}).get("bookFileCount", 0) > 0:
+                    result["audiobook"] = True
+                    logger.debug(
+                        "audiobook_available_in_readarr",
                         hardcover_id=hardcover_id,
                         book_id=book.get("id"),
-                        file_count=book.get("statistics", {}).get("bookFileCount", 0))
+                        file_count=book.get("statistics", {}).get("bookFileCount", 0),
+                    )
+                break
     
     logger.info("book_availability_checked",
                hardcover_id=hardcover_id,
@@ -237,18 +261,13 @@ async def check_books_availability_batch(
         for hardcover_id in hardcover_ids
     }
 
-    async def fetch_readarr_library(server: models.ReadarrServer) -> List[Dict[str, Any]]:
-        readarr_client = ReadarrClient.from_server(server)
-        async with readarr_client.session(timeout=15.0) as client:
-            return await readarr_client.get_library_books(client)
-
     # Ebook server
     ebook_server = db.query(models.ReadarrServer).filter(
         models.ReadarrServer.is_audiobook == False
     ).first()
     if ebook_server:
         try:
-            books = await fetch_readarr_library(ebook_server)
+            books = await _get_cached_library(ebook_server)
             for book in books:
                 foreign_id = book.get("foreignBookId")
                 if foreign_id is None:
@@ -265,7 +284,7 @@ async def check_books_availability_batch(
     ).first()
     if audiobook_server:
         try:
-            books = await fetch_readarr_library(audiobook_server)
+            books = await _get_cached_library(audiobook_server)
             for book in books:
                 foreign_id = book.get("foreignBookId")
                 if foreign_id is None:

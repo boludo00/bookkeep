@@ -50,21 +50,12 @@ function getUserInitials(name: string): string {
   return name.substring(0, 2).toUpperCase();
 }
 
-function RequestRow({ request }: { request: BookRequest }) {
+function RequestRow({ request, hasReadarrServer }: { request: BookRequest; hasReadarrServer: boolean }) {
   const queryClient = useQueryClient();
   const status = statusConfig[request.status] ?? statusConfig.requested;
   const StatusIcon = status.icon;
   const isProcessing = request.status === 'processing';
   const isApproved = request.status === 'approved';
-  const isAvailable = request.status === 'available';
-  
-  // Check if Readarr server is configured
-  const { data: readarrServers = [] } = useQuery({
-    queryKey: ['readarr-servers'],
-    queryFn: () => readarrApi.getAll(),
-  });
-  
-  const hasReadarrServer = readarrServers.length > 0;
   const canProcess = isApproved && hasReadarrServer;
 
   const deleteMutation = useMutation({
@@ -290,6 +281,13 @@ export default function Requests() {
     queryFn: () => requestsApi.getAll(0, 100, statusFilter),
   });
 
+  const { data: readarrServers = [] } = useQuery({
+    queryKey: ['readarr-servers'],
+    queryFn: () => readarrApi.getAll(),
+  });
+
+  const hasReadarrServer = readarrServers.length > 0;
+
   // Transform API requests to match frontend BookRequest type
   // Filter out requests without books to prevent UI issues
   const transformedRequests: BookRequest[] = requests
@@ -370,7 +368,7 @@ export default function Requests() {
           ) : (
             <div className="space-y-4">
               {filteredRequests.map((request) => (
-                <RequestRow key={request.id} request={request} />
+                <RequestRow key={request.id} request={request} hasReadarrServer={hasReadarrServer} />
               ))}
             </div>
           )}
