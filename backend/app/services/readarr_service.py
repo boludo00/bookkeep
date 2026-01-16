@@ -1125,6 +1125,8 @@ class ReadarrService:
         client: httpx.AsyncClient,
         add_payload: dict,
         book: models.Book,
+        edition_lock: bool = False,
+        edition_isbns: Optional[List[str]] = None,
     ) -> tuple[httpx.Response, bool, bool, dict]:
         response = await client.post(
             f"{self.readarr_client.api_url}/book",
@@ -1133,28 +1135,46 @@ class ReadarrService:
         )
         used_any_edition_retry = False
         used_search_retry = False
+        normalized_isbns = {
+            _normalize_isbn(isbn) for isbn in (edition_isbns or []) if isbn
+        }
+
+        def find_matching_foreign_edition_id(book_data: Optional[dict]) -> Optional[str]:
+            if not book_data or not normalized_isbns:
+                return None
+            editions = book_data.get("editions") or []
+            for edition in editions:
+                for key in ["isbn13", "isbn10", "isbn", "asin"]:
+                    value = edition.get(key)
+                    if not value:
+                        continue
+                    normalized = _normalize_isbn(str(value))
+                    if normalized in normalized_isbns:
+                        return str(edition.get("foreignEditionId") or edition.get("id") or "")
+            return None
 
         if (
             response.status_code >= 400
             and "Sequence contains no matching element" in response.text
             and add_payload.get("editions")
         ):
-            retry_payload = {**add_payload, "editions": [], "anyEditionOk": True}
-            logger.warning(
-                "readarr_add_retry_any_edition",
-                book_id=book.id,
-                hardcover_id=book.hardcover_id,
-                error=response.text,
-            )
-            response = await client.post(
-                f"{self.readarr_client.api_url}/book",
-                headers=self.readarr_client.headers,
-                json=retry_payload,
-            )
-            logger.info("readarr_adding_new_book_retry_any_edition")
-            used_any_edition_retry = True
-            if response.status_code in [200, 201]:
-                add_payload = retry_payload
+            if not edition_lock:
+                retry_payload = {**add_payload, "editions": [], "anyEditionOk": True}
+                logger.warning(
+                    "readarr_add_retry_any_edition",
+                    book_id=book.id,
+                    hardcover_id=book.hardcover_id,
+                    error=response.text,
+                )
+                response = await client.post(
+                    f"{self.readarr_client.api_url}/book",
+                    headers=self.readarr_client.headers,
+                    json=retry_payload,
+                )
+                logger.info("readarr_adding_new_book_retry_any_edition")
+                used_any_edition_retry = True
+                if response.status_code in [200, 201]:
+                    add_payload = retry_payload
 
         if (
             response.status_code not in [200, 201]
@@ -1206,6 +1226,16 @@ class ReadarrService:
 
                         if not book_data:
                             book_data = {}
+                        matched_edition_id = find_matching_foreign_edition_id(book_data)
+                        if edition_lock and normalized_isbns and not matched_edition_id:
+                            logger.warning(
+                                "readarr_add_retry_search_no_edition_match",
+                                book_id=book.id,
+                                hardcover_id=book.hardcover_id,
+                                matched_title=title,
+                                matched_author=author_name,
+                            )
+                            return response, used_any_edition_retry, used_search_retry, add_payload
                         search_payload = {
                             **book_data,
                             "addOptions": add_payload.get("addOptions", {}),
@@ -1223,6 +1253,9 @@ class ReadarrService:
                             "booksToMonitor": [str(foreign_id)],
                         }
                         search_payload["author"] = author_payload
+                        if matched_edition_id:
+                            search_payload["editions"] = [{"foreignEditionId": matched_edition_id, "monitored": True}]
+                            search_payload["anyEditionOk"] = False
                         logger.warning(
                             "readarr_add_retry_search_match",
                             book_id=book.id,

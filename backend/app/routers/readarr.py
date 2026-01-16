@@ -476,11 +476,27 @@ async def add_book_to_readarr(
                 any_edition_ok=add_payload.get("anyEditionOk"),
             )
             
+            edition_isbns = None
+            if edition_id and book.hardcover_id:
+                try:
+                    editions = await readarr_service.get_hardcover_editions(book.hardcover_id)
+                    for edition in editions or []:
+                        if str(edition.get("id")) == str(edition_id):
+                            edition_isbns = [
+                                edition.get("isbn_13"),
+                                edition.get("isbn_10"),
+                            ]
+                            break
+                except Exception as exc:
+                    logger.warning("readarr_edition_isbn_lookup_failed", error=str(exc), book_id=book.id)
+
             response, used_any_edition_retry, used_search_retry, add_payload = (
                 await readarr_service.post_add_book_with_retries(
                     client,
                     add_payload,
                     book,
+                    edition_lock=bool(edition_id),
+                    edition_isbns=edition_isbns,
                 )
             )
             logger.info("readarr_adding_new_book")
