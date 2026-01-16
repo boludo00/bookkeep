@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, BookOpen, Download, Loader2, Trash2, RefreshCw } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getSeriesBooks, normalizeSeriesBooks, rebuildSeries } from '@/lib/hardcover';
-import { requestsApi, booksApi } from '@/lib/api';
+import { requestsApi } from '@/lib/api';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -19,7 +19,6 @@ export default function SeriesDetail() {
   const [requestFormat, setRequestFormat] = useState<'ebook' | 'audiobook'>('ebook');
   const [seriesView, setSeriesView] = useState<'original' | 'expanded'>('original');
   const { isAdmin } = useUser();
-  const autoRefreshRef = useRef(false);
   
   const { data: seriesData, isLoading, error } = useQuery({
     queryKey: ['series', id],
@@ -84,39 +83,6 @@ export default function SeriesDetail() {
       });
     },
   });
-
-  // Refresh series availability mutation
-  const refreshSeriesMutation = useMutation({
-    mutationFn: () => booksApi.refreshSeriesAvailability(Number(id)),
-    onSuccess: async (data) => {
-      const freshSeries = await getSeriesBooks(Number(id), { bypassCache: true });
-      queryClient.setQueryData(['series', id], freshSeries);
-      queryClient.invalidateQueries({ queryKey: ['popular-series'] });
-      toast.success('Series availability refreshed!', {
-        description: `${data.ebooks_available} eBook(s) and ${data.audiobooks_available} audiobook(s) found out of ${data.total_books} books.`,
-      });
-    },
-    onError: (error: Error) => {
-      toast.error('Failed to refresh series availability', {
-        description: error.message,
-      });
-    },
-  });
-
-  useEffect(() => {
-    if (!series || !id || autoRefreshRef.current) return;
-    if (!allBooks.length) return;
-    autoRefreshRef.current = true;
-    booksApi.refreshSeriesAvailability(Number(id))
-      .then(() => getSeriesBooks(Number(id), { bypassCache: true }))
-      .then((freshSeries) => {
-        queryClient.setQueryData(['series', id], freshSeries);
-        queryClient.invalidateQueries({ queryKey: ['popular-series'] });
-      })
-      .catch(() => {
-        autoRefreshRef.current = false;
-      });
-  }, [series, id, allBooks.length, queryClient]);
 
   // Rebuild series data (admin only)
   const rebuildSeriesMutation = useMutation({
@@ -263,7 +229,7 @@ export default function SeriesDetail() {
                   size="lg"
                   variant="outline"
                   onClick={() => clearSeriesMutation.mutate()}
-                  disabled={clearSeriesMutation.isPending || requestSeriesMutation.isPending || refreshSeriesMutation.isPending}
+                  disabled={clearSeriesMutation.isPending || requestSeriesMutation.isPending}
                   className="border-destructive/50 text-destructive hover:bg-destructive/10 hover:border-destructive"
                 >
                   {clearSeriesMutation.isPending ? (
@@ -274,17 +240,6 @@ export default function SeriesDetail() {
                   Clear Requests
                 </Button>
               )}
-              
-              {/* Scan Library Button */}
-              <Button
-                size="lg"
-                variant="outline"
-                onClick={() => refreshSeriesMutation.mutate()}
-                disabled={refreshSeriesMutation.isPending || requestSeriesMutation.isPending || clearSeriesMutation.isPending}
-              >
-                <RefreshCw className={`h-4 w-4 mr-2 ${refreshSeriesMutation.isPending ? 'animate-spin' : ''}`} />
-                {refreshSeriesMutation.isPending ? 'Scanning...' : 'Scan Library'}
-              </Button>
 
               {isAdmin && (
                 <Button
@@ -294,8 +249,7 @@ export default function SeriesDetail() {
                   disabled={
                     rebuildSeriesMutation.isPending ||
                     requestSeriesMutation.isPending ||
-                    clearSeriesMutation.isPending ||
-                    refreshSeriesMutation.isPending
+                    clearSeriesMutation.isPending
                   }
                   className="border-amber-500/50 text-amber-400 hover:bg-amber-500/10 hover:border-amber-500/70"
                 >

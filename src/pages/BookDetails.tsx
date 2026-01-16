@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Star, Calendar, BookOpen, Tag, Clock, Users, Headphones, Library, ExternalLink, RefreshCw, Trash2 } from 'lucide-react';
+import { ArrowLeft, Star, Calendar, BookOpen, Tag, Clock, Users, Headphones, Library, ExternalLink, Trash2 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -8,8 +8,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { RequestDialog } from '@/components/books/RequestDialog';
 import { BookCard } from '@/components/books/BookCard';
 import { useBookDetails, useBookPrompts } from '@/hooks/useHardcoverBooks';
-import { booksApi, requestsApi, readarrApi } from '@/lib/api';
-import { getBookDetails, transformHardcoverBook } from '@/lib/hardcover';
+import { requestsApi, readarrApi } from '@/lib/api';
+import { transformHardcoverBook } from '@/lib/hardcover';
 import { toast } from 'sonner';
 import { useUser } from '@/contexts/UserContext';
 
@@ -71,37 +71,6 @@ export default function BookDetails() {
     },
     onError: (err: Error) => {
       toast.error('Failed to clear request', { description: err.message });
-    },
-  });
-
-  const refreshMutation = useMutation({
-    mutationFn: async () => {
-      if (hasHardcoverId) {
-        return booksApi.refreshByHardcoverId(hardcoverId as number);
-      }
-      if (!book?.id) {
-        throw new Error('Book ID is missing.');
-      }
-      return booksApi.refreshAvailability(Number(book.id));
-    },
-    onSuccess: async (data) => {
-      if (hasHardcoverId) {
-        const fresh = await getBookDetails(hardcoverId as number, { bypassCache: true });
-        if (fresh.books_by_pk) {
-          queryClient.setQueryData(
-            ['hardcover', 'book', id],
-            transformHardcoverBook(fresh.books_by_pk)
-          );
-        }
-      } else {
-        queryClient.invalidateQueries({ queryKey: ['hardcover', 'book', id] });
-      }
-      toast.success('Library scan complete', {
-        description: `${data.title} availability refreshed.`,
-      });
-    },
-    onError: (err: Error) => {
-      toast.error('Failed to refresh availability', { description: err.message });
     },
   });
 
@@ -390,15 +359,6 @@ export default function BookDetails() {
                     {clearRequestsMutation.isPending ? 'Clearing...' : 'Clear Request'}
                   </Button>
                 )}
-                <Button
-                  size="lg"
-                  variant="outline"
-                  onClick={() => refreshMutation.mutate()}
-                  disabled={refreshMutation.isPending}
-                >
-                  <RefreshCw className={`h-4 w-4 mr-2 ${refreshMutation.isPending ? 'animate-spin' : ''}`} />
-                  {refreshMutation.isPending ? 'Scanning...' : 'Scan Library'}
-                </Button>
               </div>
             </div>
           </div>

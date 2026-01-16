@@ -4,6 +4,7 @@ from typing import Optional, List
 from datetime import datetime, timedelta, timezone
 import structlog
 from app import database, models, schemas
+from app.cache import get_cached, set_cached, delete_cached, make_cache_key, CACHE_TTL
 from app.auth import get_current_user, require_admin
 from app.routers.readarr import add_book_to_readarr
 from app.services.readarr_service import ReadarrClient, get_readarr_server_for_format
@@ -201,7 +202,10 @@ async def create_request(
     
     # Convert book.genres from comma-separated string to list for response
     _normalize_book_genres(db_request.book)
-    
+
+    if book.hardcover_id:
+        await delete_cached(make_cache_key("requests_by_hardcover", hardcover_id=book.hardcover_id))
+
     return db_request
 
 @router.get("/", response_model=list[schemas.BookRequestResponse])
@@ -268,12 +272,19 @@ async def get_requests_for_hardcover_book(
     db: Session = Depends(database.get_db)
 ):
     """Get all non-denied requests for a book by hardcover_id (to show which formats are already requested)"""
+    cache_key = make_cache_key("requests_by_hardcover", hardcover_id=hardcover_id)
+    cached = await get_cached(cache_key)
+    if cached is not None:
+        return cached
+
     # First find the book by hardcover_id
     book = db.query(models.Book).filter(models.Book.hardcover_id == hardcover_id).first()
     
     if not book:
         # No book in database yet, so no requests exist
-        return {"ebook": None, "audiobook": None, "book_id": None}
+        result = {"ebook": None, "audiobook": None, "book_id": None}
+        await set_cached(cache_key, result, ttl=CACHE_TTL.get("requests_by_hardcover", 30))
+        return result
     
     requests = db.query(models.BookRequest).filter(
         models.BookRequest.book_id == book.id,
@@ -290,6 +301,7 @@ async def get_requests_for_hardcover_book(
                 book_id=book.id,
                 ebook=result["ebook"], 
                 audiobook=result["audiobook"])
+    await set_cached(cache_key, result, ttl=CACHE_TTL.get("requests_by_hardcover", 30))
     return result
 
 
@@ -357,6 +369,8 @@ async def clear_requests_for_book(
     db.add(book)
     
     db.commit()
+
+    await delete_cached(make_cache_key("requests_by_hardcover", hardcover_id=hardcover_id))
     
     logger.info("requests_cleared",
                hardcover_id=hardcover_id,
@@ -738,19 +752,27 @@ async def update_request(
     
     # Convert book.genres from comma-separated string to list for response
     _normalize_book_genres(db_request.book if db_request else None)
+
+    if db_request and db_request.book and db_request.book.hardcover_id:
+        await delete_cached(
+            make_cache_key("requests_by_hardcover", hardcover_id=db_request.book.hardcover_id)
+        )
     
     return db_request
 
 @router.delete("/{request_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_request(request_id: int, db: Session = Depends(database.get_db)):
+async def delete_request(request_id: int, db: Session = Depends(database.get_db)):
     db_request = db.query(models.BookRequest).filter(models.BookRequest.id == request_id).first()
     if not db_request:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Request not found"
         )
+    hardcover_id = db_request.book.hardcover_id if db_request.book else None
     db.delete(db_request)
     db.commit()
+    if hardcover_id:
+        await delete_cached(make_cache_key("requests_by_hardcover", hardcover_id=hardcover_id))
     return None
 
 def _extract_readarr_book_id_from_notes(admin_notes: str) -> Optional[int]:
