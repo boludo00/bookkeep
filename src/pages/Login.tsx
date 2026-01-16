@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Loader2, Eye, EyeOff } from 'lucide-react';
+import { Loader2, Eye, EyeOff, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -68,14 +68,10 @@ export default function Login() {
     setIsLoading(true);
     
     try {
-      // If backend is down, just log in with mock user
       if (!backendUp) {
-        localStorage.setItem('userId', '1');
-        toast.success('Welcome!', {
-          description: 'Using mock data (backend unavailable)',
+        toast.error('Backend unavailable', {
+          description: 'Start the backend service and try again.',
         });
-        navigate('/');
-        window.location.reload();
         return;
       }
       
@@ -100,16 +96,6 @@ export default function Login() {
     } finally {
       setIsLoading(false);
     }
-  };
-
-  // Auto-login when backend is down for seamless development
-  const handleMockLogin = () => {
-    localStorage.setItem('userId', '1');
-    toast.success('Mock mode enabled', {
-      description: 'Using sample data for UI development',
-    });
-    navigate('/');
-    window.location.reload();
   };
 
   if (!backendChecked || (backendUp && checkingAdmin)) {
@@ -147,7 +133,7 @@ export default function Login() {
             <Alert className="bg-muted/50 border-border">
               <AlertTriangle className="h-4 w-4" />
               <AlertDescription>
-                Backend server unavailable. You can continue with mock data for UI development.
+                Backend server unavailable. Start the backend service and refresh this page.
               </AlertDescription>
             </Alert>
           )}
@@ -190,32 +176,23 @@ export default function Login() {
               </div>
             </div>
             
-            {backendUp ? (
-              <Button 
-                type="submit" 
-                className="w-full" 
-                size="lg"
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Signing in...
-                  </>
-                ) : (
-                  'Sign In'
-                )}
-              </Button>
-            ) : (
-              <Button 
-                type="button"
-                className="w-full" 
-                size="lg"
-                onClick={handleMockLogin}
-              >
-                Continue with Mock Data
-              </Button>
-            )}
+            <Button 
+              type="submit" 
+              className="w-full" 
+              size="lg"
+              disabled={isLoading || !backendUp}
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Signing in...
+                </>
+              ) : backendUp ? (
+                'Sign In'
+              ) : (
+                'Backend Offline'
+              )}
+            </Button>
           </form>
         </CardContent>
       </Card>

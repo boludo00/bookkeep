@@ -1,35 +1,48 @@
-import { checkBackendAvailable, getMockResponse, isBackendAvailable } from './mockApi';
-
 // Use relative paths when served from same origin
 const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '' : 'http://localhost:8000');
+
+let backendAvailable: boolean | null = null;
+
+export async function checkBackendAvailable(): Promise<boolean> {
+  if (backendAvailable !== null) return backendAvailable;
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2000);
+    const response = await fetch(`${API_BASE_URL}/api/users/check/admin-exists`, {
+      method: 'GET',
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      backendAvailable = false;
+      return false;
+    }
+
+    const contentType = response.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+      backendAvailable = false;
+      return false;
+    }
+
+    const data = await response.json();
+    backendAvailable = typeof data.admin_exists === 'boolean';
+    return backendAvailable;
+  } catch {
+    backendAvailable = false;
+    return false;
+  }
+}
+
+export function isBackendAvailable(): boolean | null {
+  return backendAvailable;
+}
 
 async function apiRequest<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
-  // Check if backend is available (cached after first check)
-  const backendUp = await checkBackendAvailable();
-  
-  if (!backendUp) {
-    // Use mock data when backend is unavailable
-    const method = options.method || 'GET';
-    const mockData = getMockResponse(method, endpoint);
-    
-    if (mockData !== null) {
-      // Simulate network delay for realistic UX
-      await new Promise(resolve => setTimeout(resolve, 100 + Math.random() * 200));
-      return mockData as T;
-    }
-    
-    // For POST/PUT/DELETE operations, just return success
-    if (method !== 'GET') {
-      await new Promise(resolve => setTimeout(resolve, 100));
-      return {} as T;
-    }
-    
-    throw new Error('Backend unavailable and no mock data for this endpoint');
-  }
-  
   const url = `${API_BASE_URL}${endpoint}`;
   
   // Get user ID from localStorage or default to 1 (for development)
@@ -69,9 +82,6 @@ async function apiRequest<T>(
 
   return JSON.parse(text);
 }
-
-// Export for components that need to check backend status
-export { checkBackendAvailable, isBackendAvailable } from './mockApi';
 
 // Hardcover API endpoints
 export const hardcoverApi = {
