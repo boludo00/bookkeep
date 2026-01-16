@@ -32,6 +32,7 @@ export default function BookDetails() {
     queryKey: ['requests', 'by-hardcover', hardcoverId],
     queryFn: () => requestsApi.getByHardcoverId(hardcoverId as number),
     enabled: hasHardcoverId,
+    refetchInterval: hasHardcoverId ? 15000 : false,
   });
 
   const hasAnyRequestsForReadarr = Boolean(requestStatus?.ebook || requestStatus?.audiobook);
@@ -39,6 +40,13 @@ export default function BookDetails() {
     queryKey: ['readarr', 'manage-link', hardcoverId],
     queryFn: () => readarrApi.getManageLink(hardcoverId as number),
     enabled: hasHardcoverId && hasAnyRequestsForReadarr,
+  });
+
+  const { data: readarrAvailability } = useQuery({
+    queryKey: ['readarr', 'availability', hardcoverId],
+    queryFn: () => readarrApi.getAvailability(hardcoverId as number),
+    enabled: hasHardcoverId,
+    refetchInterval: hasHardcoverId ? 15000 : false,
   });
 
   const { data: promptSummaries = [] } = useBookPrompts(
@@ -169,8 +177,10 @@ export default function BookDetails() {
   const audiobookRequestStatus = requestStatus?.audiobook ?? null;
   const ebookRequestAvailable = ebookRequestStatus === 'available';
   const audiobookRequestAvailable = audiobookRequestStatus === 'available';
-  const ebookAvailable = book.ebookAvailable || ebookRequestAvailable || false;
-  const audiobookAvailable = book.audiobookAvailable || audiobookRequestAvailable || false;
+  const ebookAvailable =
+    book.ebookAvailable || ebookRequestAvailable || readarrAvailability?.ebook || false;
+  const audiobookAvailable =
+    book.audiobookAvailable || audiobookRequestAvailable || readarrAvailability?.audiobook || false;
   const ebookNotFound = ebookRequestStatus === 'not_found';
   const audiobookNotFound = audiobookRequestStatus === 'not_found';
   const ebookRequested =
@@ -180,6 +190,13 @@ export default function BookDetails() {
   const canRequestEbook = Boolean(user?.can_request_ebook) && !ebookAvailable;
   const canRequestAudiobook = Boolean(user?.can_request_audiobook) && !audiobookAvailable;
   const canRequestAnything = canRequestEbook || canRequestAudiobook;
+  const hasMissingFormat = !ebookAvailable || !audiobookAvailable;
+  const preferredFormat =
+    ebookAvailable && !audiobookAvailable
+      ? 'audiobook'
+      : audiobookAvailable && !ebookAvailable
+        ? 'ebook'
+        : undefined;
   const hasAnyRequests = Boolean(ebookRequestStatus || audiobookRequestStatus);
 
   return (
@@ -291,13 +308,13 @@ export default function BookDetails() {
 
               {/* Availability Badges */}
               <div className="flex flex-wrap gap-2 pt-2">
-                {book.ebookAvailable && (
+                {ebookAvailable && (
                   <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/20 border border-emerald-500/30">
                     <BookOpen className="h-4 w-4 text-emerald-400" />
                     <span className="text-sm font-medium text-emerald-400">eBook Available</span>
                   </div>
                 )}
-                {book.audiobookAvailable && (
+                {audiobookAvailable && (
                   <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/20 border border-emerald-500/30">
                     <BookOpen className="h-4 w-4 text-emerald-400" />
                     <span className="text-sm font-medium text-emerald-400">Audiobook Available</span>
@@ -307,14 +324,26 @@ export default function BookDetails() {
 
               {/* Actions */}
               <div className="flex flex-wrap gap-3 pt-2">
-                <Button
-                  size="lg"
-                  onClick={() => setRequestOpen(true)}
-                  className="bg-primary hover:bg-primary/90 glow-primary"
-                >
-                  <Clock className="h-4 w-4 mr-2" />
-                  Request Book
-                </Button>
+                {!hasAnyRequests && hasMissingFormat && canRequestAnything && (
+                  <Button
+                    size="lg"
+                    onClick={() => setRequestOpen(true)}
+                    className="bg-primary hover:bg-primary/90 glow-primary"
+                  >
+                    <Clock className="h-4 w-4 mr-2" />
+                    {preferredFormat === 'ebook'
+                      ? 'Request eBook'
+                      : preferredFormat === 'audiobook'
+                        ? 'Request Audiobook'
+                        : 'Request Book'}
+                  </Button>
+                )}
+                {hasAnyRequests && !ebookAvailable && !audiobookAvailable && (
+                  <div className="inline-flex items-center gap-2 rounded-full border border-primary/40 bg-primary/10 px-4 py-2 text-sm font-medium text-primary">
+                    <Clock className="h-4 w-4" />
+                    Requested • Processing
+                  </div>
+                )}
                 {book.hardcoverSlug && (
                   <Button
                     size="lg"
@@ -472,11 +501,16 @@ export default function BookDetails() {
         )}
       </div>
 
-      <RequestDialog
-        book={book}
-        open={requestOpen}
-        onOpenChange={setRequestOpen}
-      />
+        <RequestDialog
+          book={book}
+          open={requestOpen}
+          onOpenChange={setRequestOpen}
+          preferredFormat={preferredFormat}
+          disableFormats={{
+            ebook: ebookAvailable,
+            audiobook: audiobookAvailable,
+          }}
+        />
     </>
   );
 }
