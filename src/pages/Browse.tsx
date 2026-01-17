@@ -1,9 +1,12 @@
 import { useParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { BookCard } from '@/components/books/BookCard';
 import { BookRowSkeleton } from '@/components/books/BookRowSkeleton';
 import { useTrendingBooks, usePopularBooks, useNewReleases } from '@/hooks/useHardcoverBooks';
 import { AlertCircle } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { requestsApi } from '@/lib/api';
+import type { Book } from '@/types/book';
 
 const categoryConfig = {
   trending: {
@@ -88,17 +91,47 @@ export default function Browse() {
         <p className="text-muted-foreground mt-1">{config.description}</p>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-        {books?.map((book) => (
-          <BookCard key={book.id} book={book} />
-        ))}
-      </div>
-
-      {(!books || books.length === 0) && (
+      {books && books.length > 0 ? (
+        <BrowseRequestStatusGrid books={books} />
+      ) : (
         <div className="text-center py-12">
           <p className="text-muted-foreground">No books found</p>
         </div>
       )}
+    </div>
+  );
+}
+
+function BrowseRequestStatusGrid({ books }: { books: Book[] }) {
+  const hardcoverIds = Array.from(
+    new Set(
+      books
+        .map((book) => book.hardcoverId ?? Number(book.id))
+        .filter((bookId) => Number.isFinite(bookId))
+        .map((bookId) => Number(bookId))
+    )
+  );
+
+  const { data: requestStatuses } = useQuery({
+    queryKey: ['requests', 'by-hardcover', 'browse', hardcoverIds],
+    queryFn: () => requestsApi.getByHardcoverBatch(hardcoverIds),
+    enabled: hardcoverIds.length > 0,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const requestStatusMap = new Map(
+    requestStatuses?.results.map((item) => [item.hardcover_id, item]) ?? []
+  );
+
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+      {books.map((book) => (
+        <BookCard
+          key={book.id}
+          book={book}
+          requestStatus={requestStatusMap.get((book.hardcoverId ?? Number(book.id)) as number)}
+        />
+      ))}
     </div>
   );
 }

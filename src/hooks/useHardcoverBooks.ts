@@ -31,7 +31,16 @@ async function enrichAvailability(books: Book[]): Promise<Book[]> {
   }
 
   try {
-    const availability = await readarrApi.getAvailabilityBatch(ids);
+    const isbnMap: Record<number, string[]> = {};
+    books.forEach((book) => {
+      const hardcoverId = book.hardcoverId ?? Number(book.id);
+      if (!Number.isFinite(hardcoverId) || !book.isbn) {
+        return;
+      }
+      isbnMap[Number(hardcoverId)] = [book.isbn];
+    });
+
+    const availability = await readarrApi.getAvailabilityBatch(ids, isbnMap);
     const availabilityMap = new Map(
       availability.results.map((item) => [item.hardcover_id, item])
     );
@@ -62,7 +71,8 @@ export function useTrendingBooks(limit: number = 12) {
       const books = transformBooks(data.books || []);
       return enrichAvailability(books);
     },
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    staleTime: 24 * 60 * 60 * 1000,
+    gcTime: 24 * 60 * 60 * 1000,
   });
 }
 
@@ -74,7 +84,8 @@ export function usePopularBooks(limit: number = 12) {
       const books = transformBooks(data.books || []);
       return enrichAvailability(books);
     },
-    staleTime: 5 * 60 * 1000,
+    staleTime: 24 * 60 * 60 * 1000,
+    gcTime: 24 * 60 * 60 * 1000,
   });
 }
 
@@ -86,7 +97,8 @@ export function useNewReleases(limit: number = 12) {
       const books = transformBooks(data.books || []);
       return enrichAvailability(books);
     },
-    staleTime: 5 * 60 * 1000,
+    staleTime: 24 * 60 * 60 * 1000,
+    gcTime: 24 * 60 * 60 * 1000,
   });
 }
 
@@ -129,6 +141,7 @@ export function useBookPrompts(
       return data.prompt_summaries || [];
     },
     enabled: Number.isFinite(bookId),
-    staleTime: 5 * 60 * 1000,
+    staleTime: Infinity,
+    gcTime: 24 * 60 * 60 * 1000,
   });
 }

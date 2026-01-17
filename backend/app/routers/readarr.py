@@ -5,6 +5,7 @@ from typing import List, Optional, Dict, Any
 import httpx
 import structlog
 from app import database, models, schemas
+from app.services.readarr_service import get_readarr_availability_map
 from app.services.readarr_service import (
     ReadarrClient,
     ReadarrService,
@@ -145,37 +146,8 @@ async def check_book_availability_by_format(
     db: Session = Depends(database.get_db)
 ):
     """Check if a book is available (has files) in Readarr for each format"""
-    result = {"ebook": False, "audiobook": False}
-    
-    # Check ebook server
-    ebook_server = db.query(models.ReadarrServer).filter(
-        models.ReadarrServer.is_audiobook == False
-    ).first()
-    
-    if ebook_server:
-        readarr_client = ReadarrClient.from_server(ebook_server)
-        book = await readarr_client.find_book_in_library(None, hardcover_id)
-        if book and book.get("statistics", {}).get("bookFileCount", 0) > 0:
-            result["ebook"] = True
-            logger.debug("ebook_available_in_readarr", 
-                        hardcover_id=hardcover_id,
-                        book_id=book.get("id"),
-                        file_count=book.get("statistics", {}).get("bookFileCount", 0))
-    
-    # Check audiobook server
-    audiobook_server = db.query(models.ReadarrServer).filter(
-        models.ReadarrServer.is_audiobook == True
-    ).first()
-    
-    if audiobook_server:
-        readarr_client = ReadarrClient.from_server(audiobook_server)
-        book = await readarr_client.find_book_in_library(None, hardcover_id)
-        if book and book.get("statistics", {}).get("bookFileCount", 0) > 0:
-            result["audiobook"] = True
-            logger.debug("audiobook_available_in_readarr",
-                        hardcover_id=hardcover_id,
-                        book_id=book.get("id"),
-                        file_count=book.get("statistics", {}).get("bookFileCount", 0))
+    availability_map = await get_readarr_availability_map(db, [hardcover_id])
+    result = availability_map.get(int(hardcover_id), {"ebook": False, "audiobook": False})
     
     logger.info("book_availability_checked",
                hardcover_id=hardcover_id,
@@ -183,6 +155,52 @@ async def check_book_availability_by_format(
                audiobook_available=result["audiobook"])
     
     return result
+
+
+@router.get("/availability/readarr/{readarr_book_id}")
+async def check_readarr_book_availability(
+    readarr_book_id: int,
+    format: str = Query(..., description="Format to check: 'ebook' or 'audiobook'"),
+    db: Session = Depends(database.get_db),
+):
+    """Check if a specific Readarr book has files."""
+    if format not in ["ebook", "audiobook"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Format must be 'ebook' or 'audiobook'",
+        )
+
+    server = get_readarr_server_for_format(format, db)
+    if not server:
+        return {"available": False, "readarr_book_id": readarr_book_id, "format": format}
+
+    readarr_client = ReadarrClient.from_server(server)
+    try:
+        response = await readarr_client._get(None, f"/book/{readarr_book_id}")
+        if response.status_code == 200:
+            book_data = response.json()
+            statistics = book_data.get("statistics", {})
+            book_file_count = statistics.get("bookFileCount", 0)
+            size_on_disk = statistics.get("sizeOnDisk", 0)
+            available = book_file_count > 0 or size_on_disk > 0
+            return {
+                "available": available,
+                "readarr_book_id": readarr_book_id,
+                "format": format,
+            }
+        if response.status_code == 404:
+            logger.info("readarr_book_not_found", readarr_book_id=readarr_book_id)
+        else:
+            logger.warning(
+                "readarr_book_fetch_failed",
+                readarr_book_id=readarr_book_id,
+                status_code=response.status_code,
+                response_text=response.text[:200],
+            )
+    except Exception as e:
+        logger.warning("readarr_book_fetch_error", readarr_book_id=readarr_book_id, error=str(e))
+
+    return {"available": False, "readarr_book_id": readarr_book_id, "format": format}
 
 
 @router.get("/manage-link/{hardcover_id}")
@@ -232,49 +250,7 @@ async def check_books_availability_batch(
     if not hardcover_ids:
         return schemas.ReadarrAvailabilityBatchResponse(results=[])
 
-    result_map = {
-        hardcover_id: {"ebook": False, "audiobook": False}
-        for hardcover_id in hardcover_ids
-    }
-
-    async def fetch_readarr_library(server: models.ReadarrServer) -> List[Dict[str, Any]]:
-        readarr_client = ReadarrClient.from_server(server)
-        async with readarr_client.session(timeout=15.0) as client:
-            return await readarr_client.get_library_books(client)
-
-    # Ebook server
-    ebook_server = db.query(models.ReadarrServer).filter(
-        models.ReadarrServer.is_audiobook == False
-    ).first()
-    if ebook_server:
-        try:
-            books = await fetch_readarr_library(ebook_server)
-            for book in books:
-                foreign_id = book.get("foreignBookId")
-                if foreign_id is None:
-                    continue
-                hardcover_id = int(foreign_id)
-                if hardcover_id in result_map and book.get("statistics", {}).get("bookFileCount", 0) > 0:
-                    result_map[hardcover_id]["ebook"] = True
-        except Exception as e:
-            logger.warning("readarr_batch_ebook_availability_failed", error=str(e))
-
-    # Audiobook server
-    audiobook_server = db.query(models.ReadarrServer).filter(
-        models.ReadarrServer.is_audiobook == True
-    ).first()
-    if audiobook_server:
-        try:
-            books = await fetch_readarr_library(audiobook_server)
-            for book in books:
-                foreign_id = book.get("foreignBookId")
-                if foreign_id is None:
-                    continue
-                hardcover_id = int(foreign_id)
-                if hardcover_id in result_map and book.get("statistics", {}).get("bookFileCount", 0) > 0:
-                    result_map[hardcover_id]["audiobook"] = True
-        except Exception as e:
-            logger.warning("readarr_batch_audiobook_availability_failed", error=str(e))
+    result_map = await get_readarr_availability_map(db, hardcover_ids, isbn_map=payload.isbn_map)
 
     results = [
         schemas.ReadarrAvailabilityItem(
@@ -500,11 +476,27 @@ async def add_book_to_readarr(
                 any_edition_ok=add_payload.get("anyEditionOk"),
             )
             
+            edition_isbns = None
+            if edition_id and book.hardcover_id:
+                try:
+                    editions = await readarr_service.get_hardcover_editions(book.hardcover_id)
+                    for edition in editions or []:
+                        if str(edition.get("id")) == str(edition_id):
+                            edition_isbns = [
+                                edition.get("isbn_13"),
+                                edition.get("isbn_10"),
+                            ]
+                            break
+                except Exception as exc:
+                    logger.warning("readarr_edition_isbn_lookup_failed", error=str(exc), book_id=book.id)
+
             response, used_any_edition_retry, used_search_retry, add_payload = (
                 await readarr_service.post_add_book_with_retries(
                     client,
                     add_payload,
                     book,
+                    edition_lock=bool(edition_id),
+                    edition_isbns=edition_isbns,
                 )
             )
             logger.info("readarr_adding_new_book")

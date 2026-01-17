@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
 from app import models
+from app.cache import get_cached, set_cached, make_cache_key, CACHE_TTL
 
 logger = structlog.get_logger(__name__)
 
@@ -1124,6 +1125,8 @@ class ReadarrService:
         client: httpx.AsyncClient,
         add_payload: dict,
         book: models.Book,
+        edition_lock: bool = False,
+        edition_isbns: Optional[List[str]] = None,
     ) -> tuple[httpx.Response, bool, bool, dict]:
         response = await client.post(
             f"{self.readarr_client.api_url}/book",
@@ -1132,28 +1135,46 @@ class ReadarrService:
         )
         used_any_edition_retry = False
         used_search_retry = False
+        normalized_isbns = {
+            _normalize_isbn(isbn) for isbn in (edition_isbns or []) if isbn
+        }
+
+        def find_matching_foreign_edition_id(book_data: Optional[dict]) -> Optional[str]:
+            if not book_data or not normalized_isbns:
+                return None
+            editions = book_data.get("editions") or []
+            for edition in editions:
+                for key in ["isbn13", "isbn10", "isbn", "asin"]:
+                    value = edition.get(key)
+                    if not value:
+                        continue
+                    normalized = _normalize_isbn(str(value))
+                    if normalized in normalized_isbns:
+                        return str(edition.get("foreignEditionId") or edition.get("id") or "")
+            return None
 
         if (
             response.status_code >= 400
             and "Sequence contains no matching element" in response.text
             and add_payload.get("editions")
         ):
-            retry_payload = {**add_payload, "editions": [], "anyEditionOk": True}
-            logger.warning(
-                "readarr_add_retry_any_edition",
-                book_id=book.id,
-                hardcover_id=book.hardcover_id,
-                error=response.text,
-            )
-            response = await client.post(
-                f"{self.readarr_client.api_url}/book",
-                headers=self.readarr_client.headers,
-                json=retry_payload,
-            )
-            logger.info("readarr_adding_new_book_retry_any_edition")
-            used_any_edition_retry = True
-            if response.status_code in [200, 201]:
-                add_payload = retry_payload
+            if not edition_lock:
+                retry_payload = {**add_payload, "editions": [], "anyEditionOk": True}
+                logger.warning(
+                    "readarr_add_retry_any_edition",
+                    book_id=book.id,
+                    hardcover_id=book.hardcover_id,
+                    error=response.text,
+                )
+                response = await client.post(
+                    f"{self.readarr_client.api_url}/book",
+                    headers=self.readarr_client.headers,
+                    json=retry_payload,
+                )
+                logger.info("readarr_adding_new_book_retry_any_edition")
+                used_any_edition_retry = True
+                if response.status_code in [200, 201]:
+                    add_payload = retry_payload
 
         if (
             response.status_code not in [200, 201]
@@ -1205,6 +1226,16 @@ class ReadarrService:
 
                         if not book_data:
                             book_data = {}
+                        matched_edition_id = find_matching_foreign_edition_id(book_data)
+                        if edition_lock and normalized_isbns and not matched_edition_id:
+                            logger.warning(
+                                "readarr_add_retry_search_no_edition_match",
+                                book_id=book.id,
+                                hardcover_id=book.hardcover_id,
+                                matched_title=title,
+                                matched_author=author_name,
+                            )
+                            return response, used_any_edition_retry, used_search_retry, add_payload
                         search_payload = {
                             **book_data,
                             "addOptions": add_payload.get("addOptions", {}),
@@ -1222,6 +1253,9 @@ class ReadarrService:
                             "booksToMonitor": [str(foreign_id)],
                         }
                         search_payload["author"] = author_payload
+                        if matched_edition_id:
+                            search_payload["editions"] = [{"foreignEditionId": matched_edition_id, "monitored": True}]
+                            search_payload["anyEditionOk"] = False
                         logger.warning(
                             "readarr_add_retry_search_match",
                             book_id=book.id,
@@ -1362,3 +1396,123 @@ def get_readarr_server_for_format(
         if server:
             return server
     return None
+
+
+async def _get_cached_library(server: models.ReadarrServer) -> List[Dict[str, Any]]:
+    cache_key = make_cache_key("readarr_library", server_id=server.id)
+    cached = await get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    readarr_client = ReadarrClient.from_server(server)
+    async with readarr_client.session(timeout=15.0) as client:
+        books = await readarr_client.get_library_books(client)
+    await set_cached(cache_key, books, ttl=CACHE_TTL.get("readarr_library", 60))
+    return books
+
+
+def _normalize_isbn(value: str) -> str:
+    return "".join(ch for ch in value.upper() if ch.isalnum())
+
+
+def _availability_from_books(
+    books: List[Dict[str, Any]],
+    isbn_lookup: Optional[Dict[str, int]] = None,
+) -> Dict[int, bool]:
+    availability: Dict[int, bool] = {}
+    for book in books:
+        foreign_id = book.get("foreignBookId")
+        if foreign_id is None:
+            hardcover_id = None
+        else:
+            try:
+                hardcover_id = int(foreign_id)
+            except (TypeError, ValueError):
+                hardcover_id = None
+        has_file = book.get("statistics", {}).get("bookFileCount", 0) > 0
+        if not has_file:
+            continue
+        if hardcover_id is not None:
+            availability[hardcover_id] = True
+            continue
+        if not isbn_lookup:
+            continue
+        isbn_values: List[str] = []
+        for key in ["isbn", "isbn13", "isbn10"]:
+            value = book.get(key)
+            if not value:
+                continue
+            if isinstance(value, list):
+                isbn_values.extend([str(item) for item in value if item])
+            else:
+                isbn_values.append(str(value))
+        for raw_isbn in isbn_values:
+            normalized = _normalize_isbn(raw_isbn)
+            if not normalized:
+                continue
+            matched_id = isbn_lookup.get(normalized)
+            if matched_id is not None:
+                availability[matched_id] = True
+                break
+    return availability
+
+
+async def get_readarr_availability_map(
+    db: Session,
+    hardcover_ids: List[int],
+    isbn_map: Optional[Dict[int, List[str]]] = None,
+) -> Dict[int, Dict[str, bool]]:
+    unique_ids = {int(book_id) for book_id in hardcover_ids if book_id is not None}
+    result = {hardcover_id: {"ebook": False, "audiobook": False} for hardcover_id in unique_ids}
+    if not result:
+        return {}
+
+    isbn_lookup: Dict[str, int] = {}
+    if isbn_map:
+        for hardcover_id, values in isbn_map.items():
+            if not values:
+                continue
+            for raw_isbn in values:
+                normalized = _normalize_isbn(str(raw_isbn))
+                if normalized:
+                    isbn_lookup[normalized] = int(hardcover_id)
+
+    ebook_server = db.query(models.ReadarrServer).filter(
+        models.ReadarrServer.is_audiobook == False
+    ).first()
+    if ebook_server:
+        books = await _get_cached_library(ebook_server)
+        ebook_available = _availability_from_books(books, isbn_lookup)
+        for hardcover_id in result:
+            if ebook_available.get(hardcover_id):
+                result[hardcover_id]["ebook"] = True
+
+    audiobook_server = db.query(models.ReadarrServer).filter(
+        models.ReadarrServer.is_audiobook == True
+    ).first()
+    if audiobook_server:
+        books = await _get_cached_library(audiobook_server)
+        audiobook_available = _availability_from_books(books, isbn_lookup)
+        for hardcover_id in result:
+            if audiobook_available.get(hardcover_id):
+                result[hardcover_id]["audiobook"] = True
+
+    return result
+
+
+async def is_format_available_in_readarr(
+    db: Session,
+    hardcover_id: int,
+    format: str,
+    isbns: Optional[List[str]] = None,
+) -> bool:
+    isbn_map = {int(hardcover_id): isbns} if isbns else None
+    availability = await get_readarr_availability_map(db, [hardcover_id], isbn_map=isbn_map)
+    item = availability.get(int(hardcover_id))
+    if not item:
+        return False
+    if format == "ebook":
+        return bool(item.get("ebook"))
+    if format == "audiobook":
+        return bool(item.get("audiobook"))
+    return False

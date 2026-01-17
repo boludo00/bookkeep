@@ -313,6 +313,10 @@ class HardcoverPopularSeriesItem(BaseModel):
 
 class HardcoverPopularSeriesResponse(BaseModel):
     series: List[HardcoverPopularSeriesItem]
+    total: int = 0
+    has_more: bool = False
+    offset: int = 0
+    limit: int = 0
 
 class HardcoverSearchResult(BaseModel):
     """Individual search result item"""
@@ -424,6 +428,7 @@ class ReadarrTestConnectionResponse(BaseModel):
 
 class ReadarrAvailabilityBatchRequest(BaseModel):
     hardcover_ids: List[int]
+    isbn_map: Optional[dict[int, List[str]]] = None
 
 class ReadarrAvailabilityItem(BaseModel):
     hardcover_id: int

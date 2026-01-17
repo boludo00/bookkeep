@@ -1,7 +1,6 @@
 import { BookRow } from '@/components/books/BookRow';
 import { BookRowSkeleton } from '@/components/books/BookRowSkeleton';
 import { RequestsRow } from '@/components/books/RequestsRow';
-import { mockRequests } from '@/data/mockBooks';
 import { useTrendingBooks, usePopularBooks, useNewReleases } from '@/hooks/useHardcoverBooks';
 import { useQuery } from '@tanstack/react-query';
 import { requestsApi, settingsApi } from '@/lib/api';
@@ -61,6 +60,31 @@ export default function Discover() {
   const { data: trendingBooks, isLoading: trendingLoading, error: trendingError } = useTrendingBooks(12);
   const { data: popularBooks, isLoading: popularLoading, error: popularError } = usePopularBooks(12);
   const { data: newReleases, isLoading: newLoading, error: newError } = useNewReleases(12);
+
+  const discoverBooks = [
+    ...(trendingBooks || []),
+    ...(popularBooks || []),
+    ...(newReleases || []),
+  ];
+  const discoverHardcoverIds = Array.from(
+    new Set(
+      discoverBooks
+        .map((book) => book.hardcoverId ?? Number(book.id))
+        .filter((bookId) => Number.isFinite(bookId))
+        .map((bookId) => Number(bookId))
+    )
+  );
+
+  const { data: discoverRequestStatuses } = useQuery({
+    queryKey: ['requests', 'by-hardcover', 'discover', discoverHardcoverIds],
+    queryFn: () => requestsApi.getByHardcoverBatch(discoverHardcoverIds),
+    enabled: discoverHardcoverIds.length > 0,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const discoverRequestStatusMap = new Map(
+    discoverRequestStatuses?.results.map((item) => [item.hardcover_id, item]) ?? []
+  );
 
   const hasError = trendingError || popularError || newError;
   const hasToken = tokenStatus?.has_hardcover_token ?? false;
@@ -127,6 +151,7 @@ export default function Discover() {
           title="Trending Now"
           books={trendingBooks}
           viewAllLink="/browse/trending"
+          requestStatusMap={discoverRequestStatusMap}
         />
       ) : null}
 
@@ -145,6 +170,7 @@ export default function Discover() {
           title="Popular This Month"
           books={popularBooks}
           viewAllLink="/browse/popular"
+          requestStatusMap={discoverRequestStatusMap}
         />
       ) : null}
 
@@ -156,6 +182,7 @@ export default function Discover() {
           title="New Releases"
           books={newReleases}
           viewAllLink="/browse/new"
+          requestStatusMap={discoverRequestStatusMap}
         />
       ) : null}
     </div>

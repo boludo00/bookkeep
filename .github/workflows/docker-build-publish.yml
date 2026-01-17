@@ -85,17 +85,21 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             short_sha=$(echo "${GITHUB_SHA}" | cut -c1-7)
             image_tags="akiraslingshot/bookkeep:pr-${{ github.event.pull_request.number }}-${short_sha}"
+            app_version="pr-${{ github.event.pull_request.number }}-${short_sha}"
           elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
             image_tags=$(printf "%s\n%s\n%s" \
               "akiraslingshot/bookkeep:${{ env.new_tag }}" \
               "akiraslingshot/bookkeep:${{ env.new_version }}" \
               "akiraslingshot/bookkeep:latest")
+            app_version="${{ env.new_tag }}"
           elif [ "${{ github.ref }}" = "refs/heads/develop" ]; then
             short_sha=$(git rev-parse --short HEAD)
             image_tags="akiraslingshot/bookkeep:${{ env.latest_tag }}-develop-${short_sha}"
+            app_version="${{ env.latest_tag }}-develop-${short_sha}"
           else
             short_sha=$(git rev-parse --short HEAD)
             image_tags="akiraslingshot/bookkeep:${short_sha}"
+            app_version="${short_sha}"
           fi
 
           {
@@ -103,6 +107,7 @@ jobs:
             echo "$image_tags"
             echo "EOF"
           } >> "$GITHUB_ENV"
+          echo "APP_VERSION=$app_version" >> "$GITHUB_ENV"
 
       - name: Create and push git tag (main only)
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -125,6 +130,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: false
           tags: ${{ env.IMAGE_TAGS }}
+          build-args: |
+            APP_VERSION=${{ env.APP_VERSION }}
 
       - name: Build and push (main/develop)
         if: github.event_name == 'push'
@@ -135,3 +142,5 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ env.IMAGE_TAGS }}
+          build-args: |
+            APP_VERSION=${{ env.APP_VERSION }}

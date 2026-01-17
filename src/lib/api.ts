@@ -1,35 +1,48 @@
-import { checkBackendAvailable, getMockResponse, isBackendAvailable } from './mockApi';
-
 // Use relative paths when served from same origin
 const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '' : 'http://localhost:8000');
+
+let backendAvailable: boolean | null = null;
+
+export async function checkBackendAvailable(): Promise<boolean> {
+  if (backendAvailable !== null) return backendAvailable;
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2000);
+    const response = await fetch(`${API_BASE_URL}/api/users/check/admin-exists`, {
+      method: 'GET',
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      backendAvailable = false;
+      return false;
+    }
+
+    const contentType = response.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+      backendAvailable = false;
+      return false;
+    }
+
+    const data = await response.json();
+    backendAvailable = typeof data.admin_exists === 'boolean';
+    return backendAvailable;
+  } catch {
+    backendAvailable = false;
+    return false;
+  }
+}
+
+export function isBackendAvailable(): boolean | null {
+  return backendAvailable;
+}
 
 async function apiRequest<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
-  // Check if backend is available (cached after first check)
-  const backendUp = await checkBackendAvailable();
-  
-  if (!backendUp) {
-    // Use mock data when backend is unavailable
-    const method = options.method || 'GET';
-    const mockData = getMockResponse(method, endpoint);
-    
-    if (mockData !== null) {
-      // Simulate network delay for realistic UX
-      await new Promise(resolve => setTimeout(resolve, 100 + Math.random() * 200));
-      return mockData as T;
-    }
-    
-    // For POST/PUT/DELETE operations, just return success
-    if (method !== 'GET') {
-      await new Promise(resolve => setTimeout(resolve, 100));
-      return {} as T;
-    }
-    
-    throw new Error('Backend unavailable and no mock data for this endpoint');
-  }
-  
   const url = `${API_BASE_URL}${endpoint}`;
   
   // Get user ID from localStorage or default to 1 (for development)
@@ -69,9 +82,6 @@ async function apiRequest<T>(
 
   return JSON.parse(text);
 }
-
-// Export for components that need to check backend status
-export { checkBackendAvailable, isBackendAvailable } from './mockApi';
 
 // Hardcover API endpoints
 export const hardcoverApi = {
@@ -171,11 +181,12 @@ export const hardcoverApi = {
   getByAuthor: (bookId: number, limit: number = 10) =>
     apiRequest<{ books: any[] }>(`/api/hardcover/by-author/${bookId}?limit=${limit}`),
   
-  getPopularSeries: (limit: number = 20, minTotalRatings: number = 500) => {
+  getPopularSeries: (limit: number = 20, minTotalRatings: number = 500, offset: number = 0) => {
     const params = new URLSearchParams({
       limit: String(limit),
       min_total_ratings: String(minTotalRatings),
     });
+    if (offset > 0) params.set('offset', String(offset));
     return apiRequest<{ series: any[] }>(`/api/hardcover/popular-series?${params}`);
   },
 
@@ -228,43 +239,6 @@ export const booksApi = {
       method: 'DELETE',
     }),
   
-  refreshAvailability: (bookId: number) =>
-    apiRequest<{
-      book_id: number;
-      title: string;
-      ebook_available: boolean;
-      audiobook_available: boolean;
-      checked_sources: string[];
-    }>(`/api/books/${bookId}/refresh`, {
-      method: 'POST',
-    }),
-  
-  refreshByHardcoverId: (hardcoverId: number) =>
-    apiRequest<{
-      book_id: number;
-      title: string;
-      ebook_available: boolean;
-      audiobook_available: boolean;
-      checked_sources: string[];
-    }>(`/api/books/by-hardcover/${hardcoverId}/refresh`, {
-      method: 'POST',
-    }),
-  
-  refreshSeriesAvailability: (seriesId: number) =>
-    apiRequest<{
-      series_id: number;
-      total_books: number;
-      ebooks_available: number;
-      audiobooks_available: number;
-      books: Array<{
-        book_id: number;
-        title: string;
-        ebook_available: boolean;
-        audiobook_available: boolean;
-      }>;
-    }>(`/api/books/series/${seriesId}/refresh`, {
-      method: 'POST',
-    }),
 };
 
 // Requests API endpoints
@@ -303,15 +277,34 @@ export const requestsApi = {
     apiRequest<{ ebook: string | null; audiobook: string | null }>(`/api/requests/by-book/${bookId}`),
   
   getByHardcoverId: (hardcoverId: number) =>
-    apiRequest<{ ebook: string | null; audiobook: string | null; book_id: number | null }>(`/api/requests/by-hardcover/${hardcoverId}`),
+    apiRequest<{
+      ebook: string | null;
+      audiobook: string | null;
+      ebook_readarr_book_id: number | null;
+      audiobook_readarr_book_id: number | null;
+      book_id: number | null;
+    }>(`/api/requests/by-hardcover/${hardcoverId}`),
   
   clearByHardcoverId: (hardcoverId: number, format?: 'ebook' | 'audiobook') =>
     apiRequest<{ message: string; deleted_count: number; formats: string[] }>(
       `/api/requests/by-hardcover/${hardcoverId}${format ? `?format=${format}` : ''}`,
       { method: 'DELETE' }
     ),
+
+  getByHardcoverBatch: (hardcoverIds: number[]) =>
+    apiRequest<{ results: Array<{ hardcover_id: number; ebook: string | null; audiobook: string | null }> }>(
+      '/api/requests/by-hardcover/batch',
+      {
+        method: 'POST',
+        body: JSON.stringify({ hardcover_ids: hardcoverIds }),
+      }
+    ),
   
-  requestSeries: (seriesId: number, format: 'ebook' | 'audiobook' = 'ebook') =>
+  requestSeries: (
+    seriesId: number,
+    format: 'ebook' | 'audiobook' = 'ebook',
+    originalOnly: boolean = false
+  ) =>
     apiRequest<{
       series_id: number;
       format: string;
@@ -320,7 +313,7 @@ export const requestsApi = {
       already_available: number;
       already_requested: number;
       total_books: number;
-    }>(`/api/requests/series/${seriesId}?format=${format}`, {
+    }>(`/api/requests/series/${seriesId}?format=${format}${originalOnly ? '&original_only=true' : ''}`, {
       method: 'POST',
     }),
   
@@ -445,13 +438,18 @@ export const readarrApi = {
   getAvailability: (hardcoverId: number) =>
     apiRequest<{ ebook: boolean; audiobook: boolean }>(`/api/readarr/availability/${hardcoverId}`),
 
-  getAvailabilityBatch: (hardcoverIds: number[]) =>
+  getAvailabilityBatch: (hardcoverIds: number[], isbnMap?: Record<number, string[]>) =>
     apiRequest<{ results: Array<{ hardcover_id: number; ebook: boolean; audiobook: boolean }> }>(
       '/api/readarr/availability/batch',
       {
         method: 'POST',
-        body: JSON.stringify({ hardcover_ids: hardcoverIds }),
+        body: JSON.stringify({ hardcover_ids: hardcoverIds, isbn_map: isbnMap }),
       }
+    ),
+
+  getAvailabilityByReadarrId: (readarrBookId: number, format: 'ebook' | 'audiobook') =>
+    apiRequest<{ available: boolean; readarr_book_id: number; format: string }>(
+      `/api/readarr/availability/readarr/${readarrBookId}?format=${format}`
     ),
 
   getManageLink: (hardcoverId: number, format?: 'ebook' | 'audiobook') =>

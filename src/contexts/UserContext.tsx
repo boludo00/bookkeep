@@ -1,14 +1,12 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { usersApi, ApiUser, isBackendAvailable } from '@/lib/api';
-import { MOCK_USER } from '@/lib/mockApi';
+import { usersApi, ApiUser } from '@/lib/api';
 
 interface UserContextType {
   user: ApiUser | null;
   isLoading: boolean;
   isAdmin: boolean;
   isLoggedIn: boolean;
-  isMockMode: boolean;
   refetchUser: () => void;
   logout: () => void;
 }
@@ -59,7 +57,6 @@ export function UserProvider({ children }: { children: ReactNode }) {
     isLoading,
     isAdmin: user?.is_admin || false,
     isLoggedIn,
-    isMockMode: isBackendAvailable() === false,
     refetchUser,
     logout,
   };

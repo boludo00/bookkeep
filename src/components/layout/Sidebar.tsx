@@ -15,12 +15,28 @@ const adminItems = [
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
 
-export function Sidebar() {
+interface SidebarProps {
+  variant?: 'desktop' | 'mobile';
+  className?: string;
+}
+
+export function Sidebar({ variant = 'desktop', className }: SidebarProps) {
   const location = useLocation();
   const { isAdmin } = useUser();
   
+  const appVersion = import.meta.env.VITE_APP_VERSION || 'dev';
+  const isMobile = variant === 'mobile';
+
   return (
-    <aside className="fixed left-0 top-0 z-40 h-screen w-64 bg-sidebar-background border-r border-sidebar-border flex flex-col">
+    <aside
+      className={cn(
+        'bg-sidebar-background border-sidebar-border flex flex-col',
+        isMobile
+          ? 'h-full w-full border-r-0'
+          : 'fixed left-0 top-0 z-40 h-screen w-64 border-r',
+        className
+      )}
+    >
       {/* Logo */}
       <div className="flex items-center px-6 py-6">
         <Link
@@ -95,9 +111,9 @@ export function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div className="border-t border-sidebar-border px-4 py-4">
+      <div className={cn('border-t border-sidebar-border px-4 py-4', isMobile && 'mt-auto')}>
         <p className="text-xs text-sidebar-muted">
-          Bookkeep v1.0.0
+          Bookkeep {appVersion}
         </p>
       </div>
     </aside>

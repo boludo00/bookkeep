@@ -47,7 +47,19 @@ if DATABASE_URL.startswith("sqlite"):
         cursor.execute("PRAGMA busy_timeout=30000")  # 30 second timeout
         cursor.close()
 else:
-    engine = create_engine(DATABASE_URL)
+    pool_size = int(os.getenv("DB_POOL_SIZE", "10"))
+    max_overflow = int(os.getenv("DB_MAX_OVERFLOW", "20"))
+    pool_timeout = int(os.getenv("DB_POOL_TIMEOUT", "30"))
+    pool_recycle = int(os.getenv("DB_POOL_RECYCLE", "1800"))
+
+    engine = create_engine(
+        DATABASE_URL,
+        pool_size=pool_size,
+        max_overflow=max_overflow,
+        pool_timeout=pool_timeout,
+        pool_recycle=pool_recycle,
+        pool_pre_ping=True,
+    )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -60,4 +72,3 @@ def get_db():
         yield db
     finally:
         db.close()
-

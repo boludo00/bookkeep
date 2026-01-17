@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, BookOpen, Download, Loader2, Trash2, RefreshCw } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getSeriesBooks, normalizeSeriesBooks, rebuildSeries } from '@/lib/hardcover';
-import { requestsApi, booksApi } from '@/lib/api';
+import { requestsApi, readarrApi } from '@/lib/api';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -19,12 +19,12 @@ export default function SeriesDetail() {
   const [requestFormat, setRequestFormat] = useState<'ebook' | 'audiobook'>('ebook');
   const [seriesView, setSeriesView] = useState<'original' | 'expanded'>('original');
   const { isAdmin } = useUser();
-  const autoRefreshRef = useRef(false);
   
   const { data: seriesData, isLoading, error } = useQuery({
     queryKey: ['series', id],
     queryFn: () => getSeriesBooks(Number(id)),
     enabled: !!id && !isNaN(Number(id)),
+    staleTime: 7 * 24 * 60 * 60 * 1000,
   });
 
   const series = seriesData?.series_by_pk;
@@ -46,14 +46,65 @@ export default function SeriesDetail() {
   const allGenres = books.flatMap(book => book.genres || []);
   const uniqueGenres = [...new Set(allGenres)].slice(0, 5);
 
+  const hardcoverIds = books
+    .map((book) => book.hardcoverId ?? Number(book.id))
+    .filter((bookId): bookId is number => Number.isFinite(bookId))
+    .map((bookId) => Number(bookId));
+
+  const isbnMap = books.reduce<Record<number, string[]>>((acc, book) => {
+    const hardcoverId = book.hardcoverId ?? Number(book.id);
+    if (!Number.isFinite(hardcoverId) || !book.isbn) {
+      return acc;
+    }
+    acc[Number(hardcoverId)] = [book.isbn];
+    return acc;
+  }, {});
+
+  const { data: readarrAvailability } = useQuery({
+    queryKey: ['readarr', 'availability', 'series', id, hardcoverIds],
+    queryFn: () => readarrApi.getAvailabilityBatch(hardcoverIds, isbnMap),
+    enabled: hardcoverIds.length > 0,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const { data: requestStatuses } = useQuery({
+    queryKey: ['requests', 'by-hardcover', 'series', id, hardcoverIds],
+    queryFn: () => requestsApi.getByHardcoverBatch(hardcoverIds),
+    enabled: hardcoverIds.length > 0,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const availabilityMap = new Map(
+    readarrAvailability?.results.map((item) => [item.hardcover_id, item]) ?? []
+  );
+
+  const requestStatusMap = new Map(
+    requestStatuses?.results.map((item) => [item.hardcover_id, item]) ?? []
+  );
+
+  const booksWithAvailability = books.map((book) => {
+    const hardcoverId = book.hardcoverId ?? Number(book.id);
+    const match = Number.isFinite(hardcoverId) ? availabilityMap.get(Number(hardcoverId)) : undefined;
+    if (!match) {
+      return book;
+    }
+    return {
+      ...book,
+      ebookAvailable: book.ebookAvailable || match.ebook,
+      audiobookAvailable: book.audiobookAvailable || match.audiobook,
+    };
+  });
+
   // Count available/requested books
-  const availableCount = books.filter(b => b.ebookAvailable || b.audiobookAvailable).length;
-  const missingCount = books.length - availableCount;
+  const availableCount = booksWithAvailability.filter(
+    (b) => b.ebookAvailable || b.audiobookAvailable
+  ).length;
+  const missingCount = booksWithAvailability.length - availableCount;
 
   // Request series mutation
   const requestSeriesMutation = useMutation({
     mutationFn: (format: 'ebook' | 'audiobook') => 
-      requestsApi.requestSeries(Number(id), format),
+      requestsApi.requestSeries(Number(id), format, seriesView === 'original'),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['requests'] });
       queryClient.invalidateQueries({ queryKey: ['series', id] });
@@ -85,39 +136,6 @@ export default function SeriesDetail() {
     },
   });
 
-  // Refresh series availability mutation
-  const refreshSeriesMutation = useMutation({
-    mutationFn: () => booksApi.refreshSeriesAvailability(Number(id)),
-    onSuccess: async (data) => {
-      const freshSeries = await getSeriesBooks(Number(id), { bypassCache: true });
-      queryClient.setQueryData(['series', id], freshSeries);
-      queryClient.invalidateQueries({ queryKey: ['popular-series'] });
-      toast.success('Series availability refreshed!', {
-        description: `${data.ebooks_available} eBook(s) and ${data.audiobooks_available} audiobook(s) found out of ${data.total_books} books.`,
-      });
-    },
-    onError: (error: Error) => {
-      toast.error('Failed to refresh series availability', {
-        description: error.message,
-      });
-    },
-  });
-
-  useEffect(() => {
-    if (!series || !id || autoRefreshRef.current) return;
-    if (!allBooks.length) return;
-    autoRefreshRef.current = true;
-    booksApi.refreshSeriesAvailability(Number(id))
-      .then(() => getSeriesBooks(Number(id), { bypassCache: true }))
-      .then((freshSeries) => {
-        queryClient.setQueryData(['series', id], freshSeries);
-        queryClient.invalidateQueries({ queryKey: ['popular-series'] });
-      })
-      .catch(() => {
-        autoRefreshRef.current = false;
-      });
-  }, [series, id, allBooks.length, queryClient]);
-
   // Rebuild series data (admin only)
   const rebuildSeriesMutation = useMutation({
     mutationFn: () => rebuildSeries(Number(id)),
@@ -134,7 +152,7 @@ export default function SeriesDetail() {
   });
 
   // Check if there are any requests to clear (books that are requested but not available)
-  const requestedCount = books.filter(b => {
+  const requestedCount = booksWithAvailability.filter(b => {
     const isAvailable = b.ebookAvailable || b.audiobookAvailable;
     return !isAvailable; // Could have requests if not available
   }).length - missingCount; // Approximation - actual count would need API call
@@ -263,7 +281,7 @@ export default function SeriesDetail() {
                   size="lg"
                   variant="outline"
                   onClick={() => clearSeriesMutation.mutate()}
-                  disabled={clearSeriesMutation.isPending || requestSeriesMutation.isPending || refreshSeriesMutation.isPending}
+                  disabled={clearSeriesMutation.isPending || requestSeriesMutation.isPending}
                   className="border-destructive/50 text-destructive hover:bg-destructive/10 hover:border-destructive"
                 >
                   {clearSeriesMutation.isPending ? (
@@ -274,17 +292,6 @@ export default function SeriesDetail() {
                   Clear Requests
                 </Button>
               )}
-              
-              {/* Scan Library Button */}
-              <Button
-                size="lg"
-                variant="outline"
-                onClick={() => refreshSeriesMutation.mutate()}
-                disabled={refreshSeriesMutation.isPending || requestSeriesMutation.isPending || clearSeriesMutation.isPending}
-              >
-                <RefreshCw className={`h-4 w-4 mr-2 ${refreshSeriesMutation.isPending ? 'animate-spin' : ''}`} />
-                {refreshSeriesMutation.isPending ? 'Scanning...' : 'Scan Library'}
-              </Button>
 
               {isAdmin && (
                 <Button
@@ -294,8 +301,7 @@ export default function SeriesDetail() {
                   disabled={
                     rebuildSeriesMutation.isPending ||
                     requestSeriesMutation.isPending ||
-                    clearSeriesMutation.isPending ||
-                    refreshSeriesMutation.isPending
+                    clearSeriesMutation.isPending
                   }
                   className="border-amber-500/50 text-amber-400 hover:bg-amber-500/10 hover:border-amber-500/70"
                 >
@@ -328,15 +334,18 @@ export default function SeriesDetail() {
         <section>
           <h2 className="text-xl font-bold text-foreground mb-4">Books</h2>
           <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide -mx-4 px-4">
-            {books.map((book, index) => (
-              <div key={book.id} className="flex-shrink-0 w-[140px] sm:w-[160px] relative">
+              {booksWithAvailability.map((book, index) => (
+                <div key={book.id} className="flex-shrink-0 w-[140px] sm:w-[160px] relative">
                 {/* Position Badge */}
                 {((book as any).position ?? book.seriesPosition) != null && (
                   <div className="absolute -top-2 -left-2 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold shadow-lg">
                     {(book as any).position ?? book.seriesPosition}
                   </div>
                 )}
-                <BookCard book={book} />
+                <BookCard
+                  book={book}
+                  requestStatus={requestStatusMap.get((book.hardcoverId ?? Number(book.id)) as number)}
+                />
               </div>
             ))}
           </div>

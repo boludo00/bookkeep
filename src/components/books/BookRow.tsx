@@ -9,9 +9,10 @@ interface BookRowProps {
   title?: string;
   books: Book[];
   viewAllLink?: string;
+  requestStatusMap?: Map<number, { ebook: string | null; audiobook: string | null }>;
 }
 
-export function BookRow({ title, books, viewAllLink }: BookRowProps) {
+export function BookRow({ title, books, viewAllLink, requestStatusMap }: BookRowProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
@@ -82,7 +83,14 @@ export function BookRow({ title, books, viewAllLink }: BookRowProps) {
         >
           {books.map((book) => (
             <div key={book.id} className="flex-shrink-0 w-[140px] sm:w-[160px]">
-              <BookCard book={book} />
+              <BookCard
+                book={book}
+                requestStatus={
+                  requestStatusMap
+                    ? requestStatusMap.get((book.hardcoverId ?? Number(book.id)) as number)
+                    : undefined
+                }
+              />
             </div>
           ))}
         </div>
