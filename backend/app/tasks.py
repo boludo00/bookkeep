@@ -2,7 +2,8 @@
 Background tasks for refreshing seed data
 """
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from app.database import SessionLocal
@@ -300,6 +301,24 @@ async def check_processing_requests():
         db.close()
 
 
+def _parse_booklore_instant(value: Any) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value, tz=timezone.utc)
+    if isinstance(value, str):
+        text = value.strip()
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            return datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    return None
+
+
 async def sync_from_booklore():
     """
     Sync book availability from Booklore.
@@ -358,6 +377,8 @@ async def sync_from_booklore():
         
         for bl_book in booklore_books:
             metadata = bl_book.get("metadata") or {}
+            booklore_id = bl_book.get("id")
+            booklore_added_on = _parse_booklore_instant(bl_book.get("addedOn"))
             hardcover_id_raw = metadata.get("hardcoverId")
             
             # Extract basic info from Booklore
@@ -365,6 +386,48 @@ async def sync_from_booklore():
             authors_list = metadata.get("authors") or []
             author = ", ".join(authors_list) if authors_list else "Unknown Author"
             
+            # Determine format from Booklore book type
+            book_type = bl_book.get("bookType", "").lower()
+            if "audio" in book_type:
+                format_type = "audiobook"
+            else:
+                format_type = "ebook"
+
+            # Fast-path: if we've already imported this Booklore book, skip Hardcover lookups
+            if booklore_id:
+                existing_by_booklore = db.query(Book).filter(Book.booklore_id == booklore_id).first()
+                if existing_by_booklore:
+                    if booklore_added_on:
+                        existing_by_booklore.booklore_added_on = booklore_added_on
+                    if format_type == "audiobook":
+                        existing_by_booklore.audiobook_available = True
+                    else:
+                        existing_by_booklore.ebook_available = True
+                    existing_by_booklore.last_refreshed = datetime.now(timezone.utc)
+                    db.add(existing_by_booklore)
+
+                    existing_request = db.query(BookRequest).filter(
+                        BookRequest.book_id == existing_by_booklore.id,
+                        BookRequest.format == format_type
+                    ).first()
+                    if existing_request and existing_request.status in ("processing", "approved", "requested"):
+                        existing_request.status = "available"
+                        existing_request.updated_at = datetime.now(timezone.utc)
+                        updated_count += 1
+                        logger.info("booklore_request_updated_to_available",
+                                  hardcover_id=existing_by_booklore.hardcover_id,
+                                  request_id=existing_request.id,
+                                  title=existing_by_booklore.title,
+                                  format=format_type)
+                    try:
+                        db.commit()
+                    except Exception as commit_error:
+                        logger.warning("booklore_book_commit_failed",
+                                     title=existing_by_booklore.title,
+                                     error=str(commit_error))
+                        db.rollback()
+                    continue
+
             # hardcoverId in Booklore can be either a numeric ID or a slug
             hardcover_id_int = None
             hardcover_slug = None
@@ -469,13 +532,6 @@ async def sync_from_booklore():
                 users_count = None
                 genres = None
             
-            # Determine format from Booklore book type
-            book_type = bl_book.get("bookType", "").lower()
-            if "audio" in book_type:
-                format_type = "audiobook"
-            else:
-                format_type = "ebook"
-            
             isbn = metadata.get("isbn13") or metadata.get("isbn10")
             
             # Check if we have this book locally - try multiple identifiers for upsert
@@ -525,6 +581,10 @@ async def sync_from_booklore():
                 db_book.published_date = published_date or db_book.published_date
                 db_book.hardcover_id = hardcover_id_int  # Update with proper ID
                 db_book.hardcover_slug = hardcover_slug or db_book.hardcover_slug
+                if booklore_id:
+                    db_book.booklore_id = booklore_id
+                if booklore_added_on:
+                    db_book.booklore_added_on = booklore_added_on
                 db_book.series = series_name or db_book.series
                 if hardcover_book_data and series_id:
                     db_book.series_id = series_id
@@ -542,7 +602,7 @@ async def sync_from_booklore():
                     db_book.audiobook_available = True
                 else:
                     db_book.ebook_available = True
-                db_book.last_refreshed = datetime.now()
+                db_book.last_refreshed = datetime.now(timezone.utc)
                 db.add(db_book)
                 
                 try:
@@ -571,6 +631,10 @@ async def sync_from_booklore():
                     existing_by_hc_id = db.query(Book).filter(Book.hardcover_id == hardcover_id_int).first()
                     if existing_by_hc_id:
                         db_book = existing_by_hc_id
+                        if booklore_id:
+                            db_book.booklore_id = booklore_id
+                        if booklore_added_on:
+                            db_book.booklore_added_on = booklore_added_on
                         books_updated += 1
                         logger.info("booklore_book_found_by_hardcover_id_final_check",
                                   hardcover_id=hardcover_id_int,
@@ -586,6 +650,10 @@ async def sync_from_booklore():
                                 db_book = existing_with_isbn
                                 db_book.hardcover_id = hardcover_id_int
                                 db_book.hardcover_slug = hardcover_slug
+                                if booklore_id:
+                                    db_book.booklore_id = booklore_id
+                                if booklore_added_on:
+                                    db_book.booklore_added_on = booklore_added_on
                                 db.add(db_book)
                                 db.flush()
                                 books_updated += 1
@@ -605,6 +673,8 @@ async def sync_from_booklore():
                                     published_date=published_date,
                                     hardcover_id=hardcover_id_int,
                                     hardcover_slug=hardcover_slug,
+                                    booklore_id=booklore_id,
+                                    booklore_added_on=booklore_added_on,
                                     series=series_name,
                                     series_id=series_id if hardcover_book_data else None,
                                     series_position=series_number,
@@ -636,6 +706,8 @@ async def sync_from_booklore():
                                 published_date=published_date,
                                 hardcover_id=hardcover_id_int,
                                 hardcover_slug=hardcover_slug,
+                                booklore_id=booklore_id,
+                                booklore_added_on=booklore_added_on,
                                 series=series_name,
                                 series_id=series_id if hardcover_book_data else None,
                                 series_position=series_number,
@@ -671,7 +743,7 @@ async def sync_from_booklore():
             
             if existing_request and existing_request.status in ("processing", "approved", "requested"):
                 existing_request.status = "available"
-                existing_request.updated_at = datetime.now()
+                existing_request.updated_at = datetime.now(timezone.utc)
                 updated_count += 1
                 logger.info("booklore_request_updated_to_available",
                           hardcover_id=hardcover_id_int,
@@ -955,4 +1027,3 @@ async def sync_missing_metadata():
         db.rollback()
     finally:
         db.close()
-

@@ -127,6 +127,71 @@ async def delete_cached(key: str) -> bool:
         logger.debug("cache_delete_error", key=key, error=str(e))
         return False
 
+async def clear_cache_pattern(pattern: str) -> int:
+    """
+    Clear all cache keys matching a pattern.
+    For Redis, uses SCAN to find matching keys.
+    For in-memory cache, iterates through all keys.
+
+    Pattern examples: "requests_by_hardcover_batch:*"
+    Returns: Number of keys deleted
+    """
+    if not cache_instance:
+        return 0
+
+    deleted_count = 0
+    try:
+        # Get the cache backend type
+        cache_type = cache_instance.__class__.__name__
+
+        if hasattr(cache_instance, '_cache') and hasattr(cache_instance._cache, 'keys'):
+            # Redis backend - use keys() or scan
+            # Note: aiocache wraps the Redis client
+            import redis.asyncio as aioredis
+
+            # Build the full pattern with namespace
+            namespace = getattr(cache_instance, 'namespace', '')
+            if namespace:
+                full_pattern = f"{namespace}:{pattern}"
+            else:
+                full_pattern = pattern
+
+            # Try to get the underlying Redis client
+            if hasattr(cache_instance, '_cache'):
+                redis_client = cache_instance._cache
+                # Use SCAN to find matching keys
+                cursor = 0
+                while True:
+                    cursor, keys = await redis_client.scan(cursor, match=full_pattern, count=100)
+                    for key in keys:
+                        await redis_client.delete(key)
+                        deleted_count += 1
+                    if cursor == 0:
+                        break
+        else:
+            # In-memory backend - iterate through the internal dict
+            # aiocache's in-memory cache stores data in _cache._cache dict
+            if hasattr(cache_instance, '_cache') and hasattr(cache_instance._cache, '_cache'):
+                cache_dict = cache_instance._cache._cache
+                keys_to_delete = []
+
+                # Find keys matching pattern (simple glob-style matching)
+                import fnmatch
+                for key in list(cache_dict.keys()):
+                    if fnmatch.fnmatch(key, pattern):
+                        keys_to_delete.append(key)
+
+                # Delete matching keys
+                for key in keys_to_delete:
+                    await cache_instance.delete(key)
+                    deleted_count += 1
+
+        logger.info("cache_pattern_cleared", pattern=pattern, deleted_count=deleted_count)
+        return deleted_count
+    except Exception as e:
+        logger.warning("cache_pattern_clear_error", pattern=pattern, error=str(e))
+        return deleted_count
+
 def make_cache_key(prefix: str, **kwargs) -> str:
     """Create a cache key from prefix and keyword arguments"""
     parts = [prefix]

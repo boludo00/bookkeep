@@ -76,6 +76,7 @@ export function RequestDialog({
   const [errorDetails, setErrorDetails] = useState('');
   const [showErrorDetails, setShowErrorDetails] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isEditionError, setIsEditionError] = useState(false);
   const queryClient = useQueryClient();
 
   // Fetch configured formats
@@ -253,9 +254,11 @@ export function RequestDialog({
           requestResults.push({ format, result });
         }
         
-        // Invalidate queries
+        // Invalidate queries to trigger re-fetch and start polling
         queryClient.invalidateQueries({ queryKey: ['requests'] });
         queryClient.invalidateQueries({ queryKey: ['book-requests', book.hardcoverId] });
+        queryClient.invalidateQueries({ queryKey: ['requests', 'by-hardcover'] });
+        queryClient.invalidateQueries({ queryKey: ['readarr', 'availability'] });
         
         const confirmations = requestResults.map(({ format, result }: any) => {
           const label = format === 'ebook' ? 'eBook' : 'Audiobook';
@@ -290,6 +293,13 @@ export function RequestDialog({
         const detail = rawMessage.includes(marker)
           ? rawMessage.split(marker)[1].trim()
           : rawMessage;
+
+        // Check if this is an edition selection error
+        const isEditionIssue = rawMessage.includes('Sequence contains no matching element') ||
+                                rawMessage.includes('no matching element') ||
+                                rawMessage.includes('edition');
+
+        setIsEditionError(isEditionIssue);
         setErrorSummary(detail || 'Readarr rejected the request.');
         setErrorDetails(rawMessage);
         setShowErrorDetails(false);
@@ -569,7 +579,13 @@ export function RequestDialog({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={errorDialogOpen} onOpenChange={setErrorDialogOpen}>
+      <Dialog open={errorDialogOpen} onOpenChange={(open) => {
+        setErrorDialogOpen(open);
+        if (!open) {
+          // Reset edition error state when dialog closes
+          setIsEditionError(false);
+        }
+      }}>
         <DialogContent className="sm:max-w-md bg-card border-border">
           <DialogHeader>
             <DialogTitle className="text-foreground">Request Failed</DialogTitle>
@@ -579,14 +595,42 @@ export function RequestDialog({
               <span className="font-medium">Failed to add to Readarr.</span>{' '}
               <span className="text-destructive/80">{errorSummary}</span>
             </div>
-            <Button
-              type="button"
-              variant="ghost"
-              className="px-2 text-sm text-muted-foreground hover:text-foreground"
-              onClick={() => setShowErrorDetails((value) => !value)}
-            >
-              {showErrorDetails ? 'Hide Logs' : 'Show Logs'}
-            </Button>
+
+            {isEditionError && (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
+                <p className="font-medium text-amber-400 mb-2">Edition Selection Issue</p>
+                <p className="text-amber-400/80 text-xs">
+                  Readarr couldn't find the selected edition. Try one of these solutions:
+                </p>
+                <ul className="mt-2 space-y-1 text-xs text-amber-400/80 list-disc list-inside">
+                  <li>Select a different edition from the dropdown above</li>
+                  <li>Choose an edition with a higher "Score" value</li>
+                  <li>Try selecting an edition from a different publisher</li>
+                </ul>
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                className="px-2 text-sm text-muted-foreground hover:text-foreground"
+                onClick={() => setShowErrorDetails((value) => !value)}
+              >
+                {showErrorDetails ? 'Hide Logs' : 'Show Logs'}
+              </Button>
+              {isEditionError && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="px-3 text-sm"
+                  onClick={() => setErrorDialogOpen(false)}
+                >
+                  Try Different Edition
+                </Button>
+              )}
+            </div>
+
             {showErrorDetails && (
               <pre className="max-h-56 overflow-auto rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
                 {errorDetails}

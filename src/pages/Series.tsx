@@ -1,10 +1,11 @@
 import { useEffect, useMemo } from 'react';
-import { BookOpen, CheckCircle } from 'lucide-react';
+import { BookOpen, CheckCircle, Clock } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useInfiniteQuery, useQueries, useQuery } from '@tanstack/react-query';
-import { booksApi } from '@/lib/api';
+import { booksApi, readarrApi, requestsApi } from '@/lib/api';
 import { getPopularSeries, getSeriesBooks, normalizeSeriesBooks, transformHardcoverBook } from '@/lib/hardcover';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useAvailabilityPolling } from '@/hooks/useAvailabilityPolling';
 import type { Book } from '@/types/book';
 
 const SERIES_PAGE_SIZE = 24;
@@ -106,6 +107,92 @@ export default function Series() {
     return map;
   }, [books]);
 
+  const availabilityIds = useMemo(() => {
+    const ids = new Set<number>();
+    seriesBooksById.forEach(({ seriesBooks }) => {
+      seriesBooks.forEach((book) => {
+        const hardcoverId = book.hardcoverId ?? Number(book.id);
+        if (Number.isFinite(hardcoverId)) {
+          ids.add(Number(hardcoverId));
+        }
+      });
+    });
+    return Array.from(ids);
+  }, [seriesBooksById]);
+
+  const isbnMap = useMemo(() => {
+    const map: Record<number, string[]> = {};
+    seriesBooksById.forEach(({ seriesBooks }) => {
+      seriesBooks.forEach((book) => {
+        const hardcoverId = book.hardcoverId ?? Number(book.id);
+        if (!Number.isFinite(hardcoverId) || !book.isbn) {
+          return;
+        }
+        map[Number(hardcoverId)] = [book.isbn];
+      });
+    });
+    return map;
+  }, [seriesBooksById]);
+
+  const { data: availabilityBatch } = useQuery({
+    queryKey: ['readarr', 'availability', 'series-list', availabilityIds],
+    queryFn: () => readarrApi.getAvailabilityBatch(availabilityIds, isbnMap),
+    enabled: availabilityIds.length > 0,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const availabilityMap = useMemo(() => {
+    return new Map(
+      availabilityBatch?.results.map((item) => [item.hardcover_id, item]) ?? []
+    );
+  }, [availabilityBatch]);
+
+  // Fetch request statuses for all books in all series
+  const { data: requestStatusBatch } = useQuery({
+    queryKey: ['requests', 'by-hardcover', 'series-list', availabilityIds],
+    queryFn: () => requestsApi.getByHardcoverBatch(availabilityIds),
+    enabled: availabilityIds.length > 0,
+    staleTime: 0, // Always refetch after mutations to show updated request status
+  });
+
+  const requestStatusMap = useMemo(() => {
+    return new Map(
+      requestStatusBatch?.results.map((item: any) => [item.hardcover_id, item]) ?? []
+    );
+  }, [requestStatusBatch]);
+
+  // Find books with pending requests that need polling
+  const pendingRequests = useMemo(() => {
+    if (!requestStatusBatch?.results) return [];
+
+    return requestStatusBatch.results
+      .filter((status: any) => status.ebook === 'processing' || status.audiobook === 'processing')
+      .flatMap((status: any) => {
+        const requests: Array<{ hardcoverId: number; format: 'ebook' | 'audiobook'; readarrBookId: number | null }> = [];
+        if (status.ebook === 'processing') {
+          requests.push({
+            hardcoverId: status.hardcover_id,
+            format: 'ebook' as const,
+            readarrBookId: status.ebook_readarr_book_id || null,
+          });
+        }
+        if (status.audiobook === 'processing') {
+          requests.push({
+            hardcoverId: status.hardcover_id,
+            format: 'audiobook' as const,
+            readarrBookId: status.audiobook_readarr_book_id || null,
+          });
+        }
+        return requests;
+      });
+  }, [requestStatusBatch]);
+
+  // Poll for availability updates on books with pending requests
+  useAvailabilityPolling({
+    pendingRequests,
+    enabled: pendingRequests.length > 0,
+  });
+
   const isLoading = seriesLoading || booksLoading;
 
   useEffect(() => {
@@ -200,14 +287,49 @@ export default function Series() {
               seriesBooks[0]?.author ||
               fallbackBook?.author ||
               'Unknown Author';
-            const ownedCount =
-              series.owned_count != null
-                ? series.owned_count
-                : (ownedCountBySeriesId[series.id] ?? 0);
-              const totalCount =
-                originalBooks.length > 0
-                  ? originalBooks.length
-                  : (seriesDetail?.books_count || series.books_count || seriesBooks.length);
+            // Check if a book is actually available (has files)
+            const isAvailable = (book: Book) => {
+              const hardcoverId = book.hardcoverId ?? Number(book.id);
+              const match = Number.isFinite(hardcoverId)
+                ? availabilityMap.get(Number(hardcoverId))
+                : undefined;
+              const ebookAvailable = book.ebookAvailable || match?.ebook;
+              const audiobookAvailable = book.audiobookAvailable || match?.audiobook;
+              return ebookAvailable || audiobookAvailable;
+            };
+
+            // Check if a book is requested (but not available)
+            const isRequested = (book: Book) => {
+              const hardcoverId = book.hardcoverId ?? Number(book.id);
+              if (!Number.isFinite(hardcoverId)) return false;
+
+              const requestStatus = requestStatusMap.get(Number(hardcoverId));
+              if (!requestStatus) return false;
+
+              const hasRequest = (requestStatus as any).ebook || (requestStatus as any).audiobook;
+              return hasRequest && !isAvailable(book);
+            };
+
+            const expandedAvailableCount = seriesBooks.filter(isAvailable).length;
+            const originalAvailableCount = originalBooks.filter(isAvailable).length;
+            const expandedRequestedCount = seriesBooks.filter(isRequested).length;
+            const originalRequestedCount = originalBooks.filter(isRequested).length;
+            const expandedCount = seriesBooks.length;
+            const originalCount = originalBooks.length;
+            const availableCount =
+              expandedCount > 0
+                ? expandedAvailableCount
+                : series.owned_count != null
+                  ? series.owned_count
+                  : (ownedCountBySeriesId[series.id] ?? 0);
+            const requestedCount =
+              expandedCount > 0
+                ? expandedRequestedCount
+                : 0;
+            const totalCount =
+              originalBooks.length > 0
+                ? originalBooks.length
+                : (seriesDetail?.books_count || series.books_count || seriesBooks.length);
 
               return (
                 <Link
@@ -247,16 +369,44 @@ export default function Series() {
                         <p className="text-sm text-muted-foreground mt-1 line-clamp-1">
                           {author}
                         </p>
-                        {/* Owned count indicator */}
-                        {ownedCount > 0 ? (
-                          <div className="flex items-center gap-2 mt-2">
-                            <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/30">
-                              <CheckCircle className="h-3.5 w-3.5 text-emerald-400" />
-                              <span className="text-xs font-medium text-emerald-400">
-                                {ownedCount}/{totalCount} owned
-                              </span>
-                            </div>
-                            {totalCount > 0 && ownedCount === totalCount && (
+                        {/* Status indicators */}
+                        {availableCount > 0 || requestedCount > 0 ? (
+                          <div className="flex items-center gap-2 mt-2 flex-wrap">
+                            {/* Available count */}
+                            {availableCount > 0 && (
+                              <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/30">
+                                <CheckCircle className="h-3.5 w-3.5 text-emerald-400" />
+                                <span className="text-xs font-medium text-emerald-400">
+                                  {originalCount > 0 ? `${originalAvailableCount}/${originalCount} available` : `${availableCount}/${totalCount} available`}
+                                </span>
+                              </div>
+                            )}
+
+                            {/* Requested count */}
+                            {requestedCount > 0 && (
+                              <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-blue-500/20 border border-blue-500/30">
+                                <Clock className="h-3.5 w-3.5 text-blue-400" />
+                                <span className="text-xs font-medium text-blue-400">
+                                  {originalCount > 0 ? `${originalRequestedCount} requested` : `${requestedCount} requested`}
+                                </span>
+                              </div>
+                            )}
+
+                            {/* Expanded counts if different from original */}
+                            {expandedCount > 0 && expandedCount !== originalCount && (
+                              <>
+                                {expandedAvailableCount > 0 && (
+                                  <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20">
+                                    <span className="text-xs font-medium text-emerald-300">
+                                      {expandedAvailableCount}/{expandedCount} expanded
+                                    </span>
+                                  </div>
+                                )}
+                              </>
+                            )}
+
+                            {/* Complete indicator */}
+                            {totalCount > 0 && availableCount === totalCount && expandedCount === originalCount && (
                               <span className="text-xs text-emerald-400 font-medium">Complete!</span>
                             )}
                           </div>

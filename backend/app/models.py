@@ -39,6 +39,8 @@ class Book(Base):
     page_count = Column(Integer, nullable=True)
     hardcover_id = Column(Integer, nullable=True, index=True, unique=True)
     hardcover_slug = Column(String, nullable=True, index=True)
+    booklore_id = Column(Integer, nullable=True, index=True, unique=True)
+    booklore_added_on = Column(DateTime(timezone=True), nullable=True)
     default_edition_id = Column(Integer, nullable=True)
     default_physical_edition_id = Column(Integer, nullable=True)
     default_ebook_edition_id = Column(Integer, nullable=True)
@@ -92,9 +94,13 @@ class BookRequest(Base):
     admin_notes = Column(Text, nullable=True)
     readarr_book_id = Column(Integer, nullable=True, index=True)  # Readarr's internal book ID for status tracking
     edition_id = Column(Integer, nullable=True)  # Hardcover edition id selected for request
+    readarr_received = Column(Boolean, default=False, nullable=False)  # Whether Readarr acknowledged receiving the book
+    readarr_search_triggered = Column(Boolean, nullable=True)  # Whether search was triggered (True/False/None if unknown)
+    readarr_search_status_code = Column(Integer, nullable=True)  # HTTP status code from search command
+    readarr_message = Column(Text, nullable=True)  # Status/error message from Readarr
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
+
     book = relationship("Book", back_populates="requests")
     user = relationship("User", back_populates="requests")
 

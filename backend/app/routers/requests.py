@@ -5,7 +5,7 @@ from typing import Optional, List
 from datetime import datetime, timedelta, timezone
 import structlog
 from app import database, models, schemas
-from app.cache import get_cached, set_cached, delete_cached, make_cache_key, CACHE_TTL
+from app.cache import get_cached, set_cached, delete_cached, make_cache_key, CACHE_TTL, clear_cache_pattern
 from app.auth import get_current_user, require_admin
 from app.routers.readarr import add_book_to_readarr
 from app.services.readarr_service import (
@@ -228,6 +228,8 @@ async def create_request(
 
     if book.hardcover_id:
         await delete_cached(make_cache_key("requests_by_hardcover", hardcover_id=book.hardcover_id))
+        # Also clear batch caches that might contain this book
+        await clear_cache_pattern("requests_by_hardcover_batch:*")
 
     return db_request
 
@@ -445,7 +447,9 @@ async def clear_requests_for_book(
     db.commit()
 
     await delete_cached(make_cache_key("requests_by_hardcover", hardcover_id=hardcover_id))
-    
+    # Clear batch caches
+    await clear_cache_pattern("requests_by_hardcover_batch:*")
+
     logger.info("requests_cleared",
                hardcover_id=hardcover_id,
                book_id=book.id,
@@ -453,7 +457,7 @@ async def clear_requests_for_book(
                formats=deleted_formats,
                user_id=current_user.id,
                is_admin=current_user.is_admin)
-    
+
     return {
         "message": f"Cleared {deleted_count} request(s)",
         "deleted_count": deleted_count,
@@ -498,6 +502,8 @@ async def request_series(
     skipped_count = 0
     already_available = 0
     already_requested = 0
+    failed_count = 0
+    failed_books = []  # Track which books failed for better user feedback
 
     availability_map = {}
     hardcover_ids = [book.hardcover_id for book in books_in_series if book.hardcover_id]
@@ -579,23 +585,53 @@ async def request_series(
                     new_request.status = "processing"
                     if readarr_book_id:
                         new_request.readarr_book_id = readarr_book_id
+
+                    # Store Readarr tracking information
+                    new_request.readarr_received = True
+                    new_request.readarr_search_triggered = result.get("readarr_search_triggered")
+                    new_request.readarr_search_status_code = result.get("readarr_search_status_code")
+
                     logger.info("series_book_added_to_readarr",
                                series_id=series_id,
                                book_id=book.id,
                                book_title=book.title,
                                readarr_book_id=readarr_book_id)
                 except Exception as e:
+                    error_msg = str(e)
                     logger.warning("series_book_readarr_failed",
                                   series_id=series_id,
                                   book_id=book.id,
                                   book_title=book.title,
-                                  error=str(e))
-                    new_request.notes = (new_request.notes or "") + f"\n[Error] Readarr: {str(e)}"
+                                  error=error_msg)
+
+                    # Mark request as failed and rollback this specific request
+                    new_request.readarr_received = False
+                    new_request.readarr_message = error_msg
+                    new_request.notes = (new_request.notes or "") + f"\n[Error] Readarr: {error_msg}"
+
+                    # Track the failure for user feedback
+                    failed_count += 1
+                    failed_books.append({
+                        "title": book.title,
+                        "position": book.series_position,
+                        "error": error_msg
+                    })
+
+                    # Don't count this as successfully requested
+                    requested_count -= 1
             else:
                 logger.warning("series_book_no_readarr_server",
                               series_id=series_id,
                               book_id=book.id,
                               format=format)
+                new_request.notes = (new_request.notes or "") + f"\n[Error] No Readarr server configured for {format}"
+                failed_count += 1
+                failed_books.append({
+                    "title": book.title,
+                    "position": book.series_position,
+                    "error": f"No Readarr server configured for {format}"
+                })
+                requested_count -= 1
         
         requested_count += 1
         
@@ -608,16 +644,26 @@ async def request_series(
                    user_id=current_user.id)
     
     db.commit()
-    
+
+    # Clear batch cache for all books in this series
+    for book in books_in_series:
+        if book.hardcover_id:
+            await delete_cached(make_cache_key("requests_by_hardcover", hardcover_id=book.hardcover_id))
+
+    # Clear all batch caches (they contain combinations of hardcover IDs)
+    # This is a bit aggressive but necessary since batch caches contain arbitrary combinations
+    await clear_cache_pattern("requests_by_hardcover_batch:*")
+
     logger.info("series_request_complete",
                series_id=series_id,
                requested_count=requested_count,
                skipped_count=skipped_count,
                already_available=already_available,
                already_requested=already_requested,
+               failed_count=failed_count,
                format=format,
                user_id=current_user.id)
-    
+
     return {
         "series_id": series_id,
         "format": format,
@@ -625,6 +671,8 @@ async def request_series(
         "skipped_count": skipped_count,
         "already_available": already_available,
         "already_requested": already_requested,
+        "failed_count": failed_count,
+        "failed_books": failed_books if failed_books else None,
         "total_books": len(books_in_series)
     }
 
@@ -704,7 +752,19 @@ async def clear_series_requests(
                 db.add(book)
     
     db.commit()
-    
+
+    # Clear individual and batch caches for all affected books
+    affected_hardcover_ids = []
+    for book_id in affected_books:
+        book = db.query(models.Book).filter(models.Book.id == book_id).first()
+        if book and book.hardcover_id:
+            affected_hardcover_ids.append(book.hardcover_id)
+            await delete_cached(make_cache_key("requests_by_hardcover", hardcover_id=book.hardcover_id))
+
+    # Clear batch caches
+    if affected_hardcover_ids:
+        await clear_cache_pattern("requests_by_hardcover_batch:*")
+
     logger.info("series_requests_cleared",
                series_id=series_id,
                deleted_count=deleted_count,
@@ -712,7 +772,7 @@ async def clear_series_requests(
                affected_books=len(affected_books),
                user_id=current_user.id,
                is_admin=current_user.is_admin)
-    
+
     return {
         "message": f"Cleared {deleted_count} request(s) for series",
         "series_id": series_id,
@@ -854,7 +914,9 @@ async def update_request(
         await delete_cached(
             make_cache_key("requests_by_hardcover", hardcover_id=db_request.book.hardcover_id)
         )
-    
+        # Clear batch caches
+        await clear_cache_pattern("requests_by_hardcover_batch:*")
+
     return db_request
 
 @router.delete("/{request_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -870,6 +932,8 @@ async def delete_request(request_id: int, db: Session = Depends(database.get_db)
     db.commit()
     if hardcover_id:
         await delete_cached(make_cache_key("requests_by_hardcover", hardcover_id=hardcover_id))
+        # Clear batch caches
+        await clear_cache_pattern("requests_by_hardcover_batch:*")
     return None
 
 def _extract_readarr_book_id_from_notes(admin_notes: str) -> Optional[int]:
