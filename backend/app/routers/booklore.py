@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import Optional, Dict, Any, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import httpx
 import structlog
 
@@ -17,6 +17,13 @@ router = APIRouter()
 # Token cache - stores tokens in memory for quick access
 _token_cache: Dict[int, Dict[str, Any]] = {}
 
+def _as_utc(value: Optional[datetime]) -> Optional[datetime]:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
 
 async def get_booklore_token(server: models.BookloreServer, db: Session) -> str:
     """
@@ -28,16 +35,18 @@ async def get_booklore_token(server: models.BookloreServer, db: Session) -> str:
     # Check memory cache first
     if server_id in _token_cache:
         cached = _token_cache[server_id]
-        if cached.get("expires_at") and cached["expires_at"] > datetime.now():
+        cached_expires_at = _as_utc(cached.get("expires_at"))
+        if cached_expires_at and cached_expires_at > datetime.now(timezone.utc):
             return cached["access_token"]
     
     # Check database cache
     if server.access_token and server.token_expires_at:
-        if server.token_expires_at > datetime.now():
+        token_expires_at = _as_utc(server.token_expires_at)
+        if token_expires_at and token_expires_at > datetime.now(timezone.utc):
             # Cache in memory
             _token_cache[server_id] = {
                 "access_token": server.access_token,
-                "expires_at": server.token_expires_at
+                "expires_at": token_expires_at
             }
             return server.access_token
         
@@ -57,7 +66,7 @@ async def get_booklore_token(server: models.BookloreServer, db: Session) -> str:
     server.access_token = tokens["access_token"]
     server.refresh_token = tokens.get("refresh_token")
     # JWT tokens typically expire in 24 hours, but we'll be conservative
-    server.token_expires_at = datetime.now() + timedelta(hours=23)
+    server.token_expires_at = datetime.now(timezone.utc) + timedelta(hours=23)
     db.add(server)
     db.commit()
     
@@ -453,4 +462,3 @@ async def check_book_availability(
         "available": book is not None,
         "book": book
     }
-
