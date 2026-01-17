@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo } from 'react';
 import { BookOpen, CheckCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useInfiniteQuery, useQueries, useQuery } from '@tanstack/react-query';
@@ -22,14 +22,15 @@ export default function Series() {
     data: seriesData,
     isLoading: seriesLoading,
     fetchNextPage,
-    hasNextPage,
     isFetchingNextPage,
   } = useInfiniteQuery({
     queryKey: ['popular-series', SERIES_PAGE_SIZE],
     queryFn: ({ pageParam = 0 }) => getPopularSeries(SERIES_PAGE_SIZE, 500, pageParam),
     initialPageParam: 0,
-    getNextPageParam: (lastPage) =>
-      lastPage?.has_more ? lastPage.offset + lastPage.limit : undefined,
+    getNextPageParam: (lastPage, allPages) =>
+      lastPage?.series?.length === SERIES_PAGE_SIZE
+        ? allPages.length * SERIES_PAGE_SIZE
+        : undefined,
     staleTime: 5 * 60 * 1000,
   });
 
@@ -42,7 +43,8 @@ export default function Series() {
     () => seriesData?.pages.flatMap((page) => page.series) ?? [],
     [seriesData]
   );
-  const loadMoreRef = useRef<HTMLDivElement | null>(null);
+  const lastPageSize = seriesData?.pages?.[seriesData.pages.length - 1]?.series?.length ?? 0;
+  const canLoadMore = lastPageSize === SERIES_PAGE_SIZE;
   const books: Book[] = useMemo(
     () =>
       booksData.map((book: any) => ({
@@ -107,23 +109,34 @@ export default function Series() {
   const isLoading = seriesLoading || booksLoading;
 
   useEffect(() => {
-    const node = loadMoreRef.current;
-    if (!node || !hasNextPage) {
+    if (!canLoadMore) {
       return;
     }
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting && !isFetchingNextPage) {
-          fetchNextPage();
-        }
-      },
-      { rootMargin: '200px' }
-    );
+    const maybeFetch = () => {
+      if (isFetchingNextPage || !canLoadMore) {
+        return;
+      }
+      const scrollingElement = document.scrollingElement || document.documentElement;
+      const scrollBottom =
+        scrollingElement.scrollTop + window.innerHeight;
+      const threshold = scrollingElement.scrollHeight - 400;
+      if (scrollBottom >= threshold) {
+        fetchNextPage();
+      }
+    };
 
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
+    window.addEventListener('scroll', maybeFetch, { passive: true });
+    window.addEventListener('resize', maybeFetch);
+    const intervalId = window.setInterval(maybeFetch, 800);
+    maybeFetch();
+
+    return () => {
+      window.removeEventListener('scroll', maybeFetch);
+      window.removeEventListener('resize', maybeFetch);
+      window.clearInterval(intervalId);
+    };
+  }, [fetchNextPage, canLoadMore, isFetchingNextPage, seriesList.length]);
 
   return (
     <div className="space-y-6">
@@ -260,7 +273,7 @@ export default function Series() {
             })}
           </div>
 
-          {hasNextPage && <div ref={loadMoreRef} className="h-6" />}
+          {canLoadMore && <div className="h-6" />}
 
           {isFetchingNextPage && (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
