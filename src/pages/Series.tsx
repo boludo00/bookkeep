@@ -1,11 +1,13 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { BookOpen, CheckCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { useQueries, useQuery } from '@tanstack/react-query';
-import { booksApi, readarrApi } from '@/lib/api';
+import { useInfiniteQuery, useQueries, useQuery } from '@tanstack/react-query';
+import { booksApi } from '@/lib/api';
 import { getPopularSeries, getSeriesBooks, normalizeSeriesBooks, transformHardcoverBook } from '@/lib/hardcover';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { Book } from '@/types/book';
+
+const SERIES_PAGE_SIZE = 24;
 
 interface SeriesItem {
   id: number;
@@ -16,9 +18,19 @@ interface SeriesItem {
 }
 
 export default function Series() {
-  const { data: seriesData, isLoading: seriesLoading } = useQuery({
-    queryKey: ['popular-series'],
-    queryFn: () => getPopularSeries(30),
+  const {
+    data: seriesData,
+    isLoading: seriesLoading,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
+    queryKey: ['popular-series', SERIES_PAGE_SIZE],
+    queryFn: ({ pageParam = 0 }) => getPopularSeries(SERIES_PAGE_SIZE, 500, pageParam),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage) =>
+      lastPage?.has_more ? lastPage.offset + lastPage.limit : undefined,
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: booksData = [], isLoading: booksLoading } = useQuery({
@@ -26,7 +38,11 @@ export default function Series() {
     queryFn: () => booksApi.getAll(0, 2000),
   });
 
-  const seriesList: SeriesItem[] = seriesData?.series || [];
+  const seriesList: SeriesItem[] = useMemo(
+    () => seriesData?.pages.flatMap((page) => page.series) ?? [],
+    [seriesData]
+  );
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const books: Book[] = useMemo(
     () =>
       booksData.map((book: any) => ({
@@ -73,47 +89,41 @@ export default function Series() {
     });
   }, [seriesList, seriesQueries]);
 
-  const availabilityIds = useMemo(() => {
-    const ids = new Set<number>();
-    seriesBooksById.forEach(({ seriesBooks }) => {
-      seriesBooks.forEach((book) => {
-        const hardcoverId = book.hardcoverId ?? Number(book.id);
-        if (Number.isFinite(hardcoverId)) {
-          ids.add(Number(hardcoverId));
-        }
-      });
-    });
-    return Array.from(ids);
-  }, [seriesBooksById]);
-
-  const isbnMap = useMemo(() => {
-    const map: Record<number, string[]> = {};
-    seriesBooksById.forEach(({ seriesBooks }) => {
-      seriesBooks.forEach((book) => {
-        const hardcoverId = book.hardcoverId ?? Number(book.id);
-        if (!Number.isFinite(hardcoverId) || !book.isbn) {
-          return;
-        }
-        map[Number(hardcoverId)] = [book.isbn];
-      });
+  const ownedCountBySeriesId = useMemo(() => {
+    const map: Record<number, number> = {};
+    books.forEach((book) => {
+      if (!book.seriesId) {
+        return;
+      }
+      const isOwned = book.ebookAvailable || book.audiobookAvailable;
+      if (!isOwned) {
+        return;
+      }
+      map[book.seriesId] = (map[book.seriesId] ?? 0) + 1;
     });
     return map;
-  }, [seriesBooksById]);
-
-  const { data: availabilityBatch } = useQuery({
-    queryKey: ['readarr', 'availability', 'series-list', availabilityIds],
-    queryFn: () => readarrApi.getAvailabilityBatch(availabilityIds, isbnMap),
-    enabled: availabilityIds.length > 0,
-    staleTime: 5 * 60 * 1000,
-  });
-
-  const availabilityMap = useMemo(() => {
-    return new Map(
-      availabilityBatch?.results.map((item) => [item.hardcover_id, item]) ?? []
-    );
-  }, [availabilityBatch]);
+  }, [books]);
 
   const isLoading = seriesLoading || booksLoading;
+
+  useEffect(() => {
+    const node = loadMoreRef.current;
+    if (!node || !hasNextPage) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting && !isFetchingNextPage) {
+          fetchNextPage();
+        }
+      },
+      { rootMargin: '200px' }
+    );
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
 
   return (
     <div className="space-y-6">
@@ -160,103 +170,121 @@ export default function Series() {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {seriesBooksById.map(({ series, seriesDetail, seriesBooks }, index) => {
-            const isWholePosition = (position?: number | null) =>
-              typeof position === 'number' &&
-              Number.isFinite(position) &&
-              Math.floor(position) === position;
-            const originalBooks = seriesBooks.filter((book) =>
-              isWholePosition((book as any).position ?? book.seriesPosition)
-            );
-            const fallbackBook = series.first_book ? transformHardcoverBook(series.first_book) : null;
-            const cover = seriesBooks[0]?.cover || fallbackBook?.cover || '/placeholder.svg';
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {seriesBooksById.map(({ series, seriesDetail, seriesBooks }) => {
+              const isWholePosition = (position?: number | null) =>
+                typeof position === 'number' &&
+                Number.isFinite(position) &&
+                Math.floor(position) === position;
+              const originalBooks = seriesBooks.filter((book) =>
+                isWholePosition((book as any).position ?? book.seriesPosition)
+              );
+              const fallbackBook = series.first_book ? transformHardcoverBook(series.first_book) : null;
+              const cover = seriesBooks[0]?.cover || fallbackBook?.cover || '/placeholder.svg';
             const author =
               seriesDetail?.author?.name ||
               seriesBooks[0]?.author ||
               fallbackBook?.author ||
               'Unknown Author';
-            const ownedBooks = originalBooks.length > 0 ? originalBooks : seriesBooks;
             const ownedCount =
-              ownedBooks.length > 0
-                ? ownedBooks.filter((book) => {
-                    const hardcoverId = book.hardcoverId ?? Number(book.id);
-                    const match = Number.isFinite(hardcoverId)
-                      ? availabilityMap.get(Number(hardcoverId))
-                      : undefined;
-                    const ebookAvailable = book.ebookAvailable || match?.ebook;
-                    const audiobookAvailable = book.audiobookAvailable || match?.audiobook;
-                    return ebookAvailable || audiobookAvailable;
-                  }).length
-                : series.owned_count || 0;
-            const totalCount =
-              originalBooks.length > 0
-                ? originalBooks.length
-                : (seriesDetail?.books_count || series.books_count || seriesBooks.length);
+              series.owned_count != null
+                ? series.owned_count
+                : (ownedCountBySeriesId[series.id] ?? 0);
+              const totalCount =
+                originalBooks.length > 0
+                  ? originalBooks.length
+                  : (seriesDetail?.books_count || series.books_count || seriesBooks.length);
 
-            return (
-              <Link
-                key={series.id}
-                to={`/series/${series.id}`}
-                className="group relative rounded-xl overflow-hidden bg-card border border-border card-hover"
-              >
-                {/* Background */}
-                <div className="absolute inset-0">
-                  <img
-                    src={cover}
-                    alt=""
-                    className="h-full w-full object-cover opacity-30 blur-xl scale-110"
-                  />
-                  <div className="absolute inset-0 bg-card/80" />
-                </div>
+              return (
+                <Link
+                  key={series.id}
+                  to={`/series/${series.id}`}
+                  className="group relative rounded-xl overflow-hidden bg-card border border-border card-hover"
+                >
+                  {/* Background */}
+                  <div className="absolute inset-0">
+                    <img
+                      src={cover}
+                      alt=""
+                      className="h-full w-full object-cover opacity-30 blur-xl scale-110"
+                    />
+                    <div className="absolute inset-0 bg-card/80" />
+                  </div>
 
-                {/* Content */}
-                <div className="relative p-6">
-                  <div className="flex gap-4">
-                    {/* Cover */}
-                    <div className="flex-shrink-0 w-20 h-28">
-                      {(seriesBooks[0] || fallbackBook) && (
-                        <img
-                          src={cover}
-                          alt={seriesBooks[0]?.title || fallbackBook?.title || series.name}
-                          className="w-full h-full object-cover rounded shadow-lg"
-                        />
-                      )}
-                    </div>
+                  {/* Content */}
+                  <div className="relative p-6">
+                    <div className="flex gap-4">
+                      {/* Cover */}
+                      <div className="flex-shrink-0 w-20 h-28">
+                        {(seriesBooks[0] || fallbackBook) && (
+                          <img
+                            src={cover}
+                            alt={seriesBooks[0]?.title || fallbackBook?.title || series.name}
+                            className="w-full h-full object-cover rounded shadow-lg"
+                          />
+                        )}
+                      </div>
 
-                    {/* Info */}
-                    <div className="flex-1 min-w-0 pt-2">
-                      <h3 className="font-semibold text-foreground text-lg line-clamp-2">
-                        {seriesDetail?.name || series.name}
-                      </h3>
-                      <p className="text-sm text-muted-foreground mt-1 line-clamp-1">
-                        {author}
-                      </p>
-                      {/* Owned count indicator */}
-                      {ownedCount > 0 ? (
-                        <div className="flex items-center gap-2 mt-2">
-                          <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/30">
-                            <CheckCircle className="h-3.5 w-3.5 text-emerald-400" />
-                            <span className="text-xs font-medium text-emerald-400">
-                              {ownedCount}/{totalCount} owned
-                            </span>
-                          </div>
-                          {totalCount > 0 && ownedCount === totalCount && (
-                            <span className="text-xs text-emerald-400 font-medium">Complete!</span>
-                          )}
-                        </div>
-                      ) : (
-                        <p className="text-sm text-primary mt-2">
-                          {totalCount} book{totalCount !== 1 ? 's' : ''}
+                      {/* Info */}
+                      <div className="flex-1 min-w-0 pt-2">
+                        <h3 className="font-semibold text-foreground text-lg line-clamp-2">
+                          {seriesDetail?.name || series.name}
+                        </h3>
+                        <p className="text-sm text-muted-foreground mt-1 line-clamp-1">
+                          {author}
                         </p>
-                      )}
+                        {/* Owned count indicator */}
+                        {ownedCount > 0 ? (
+                          <div className="flex items-center gap-2 mt-2">
+                            <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/30">
+                              <CheckCircle className="h-3.5 w-3.5 text-emerald-400" />
+                              <span className="text-xs font-medium text-emerald-400">
+                                {ownedCount}/{totalCount} owned
+                              </span>
+                            </div>
+                            {totalCount > 0 && ownedCount === totalCount && (
+                              <span className="text-xs text-emerald-400 font-medium">Complete!</span>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-primary mt-2">
+                            {totalCount} book{totalCount !== 1 ? 's' : ''}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+
+          {hasNextPage && <div ref={loadMoreRef} className="h-6" />}
+
+          {isFetchingNextPage && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="relative rounded-xl overflow-hidden bg-card border border-border"
+                >
+                  <div className="absolute inset-0 bg-muted/30" />
+                  <div className="relative p-6">
+                    <div className="flex gap-4">
+                      <Skeleton className="flex-shrink-0 w-20 h-28 rounded" />
+                      <div className="flex-1 min-w-0 pt-2 space-y-2">
+                        <Skeleton className="h-5 w-3/4" />
+                        <Skeleton className="h-4 w-1/2" />
+                        <Skeleton className="h-4 w-1/3 mt-2" />
+                      </div>
                     </div>
                   </div>
                 </div>
-              </Link>
-            );
-          })}
-        </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

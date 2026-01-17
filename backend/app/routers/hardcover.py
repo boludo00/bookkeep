@@ -2406,12 +2406,18 @@ def _get_owned_counts_for_series(series_ids: list, db: Session) -> dict:
 @router.get("/popular-series", response_model=schemas.HardcoverPopularSeriesResponse)
 async def get_popular_series(
     limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     min_total_ratings: int = Query(500, ge=0, description="Minimum total ratings across all books in series"),
     db: Session = Depends(database.get_db)
 ):
     """Get popular series - Cache → API (complex query, cache is better)"""
     # Check cache first (complex query)
-    cache_key = cache.make_cache_key("popular_series", limit=limit, min_total_ratings=min_total_ratings)
+    cache_key = cache.make_cache_key(
+        "popular_series",
+        limit=limit,
+        offset=offset,
+        min_total_ratings=min_total_ratings
+    )
     cached_result = await cache.get_cached(cache_key)
     if cached_result is not None:
         logger.info("popular_series_cache_hit", limit=limit)
@@ -2423,11 +2429,25 @@ async def get_popular_series(
         # Update owned counts in cached result
         for series in series_list:
             series["owned_count"] = owned_counts.get(series["id"], 0)
-        
-        return schemas.HardcoverPopularSeriesResponse(series=series_list)
+
+        total = cached_result.get("total", len(series_list))
+        cached_offset = cached_result.get("offset", offset)
+        cached_limit = cached_result.get("limit", limit)
+        has_more = cached_result.get("has_more")
+        if has_more is None or has_more is False:
+            # If the page is full, allow the client to attempt the next page.
+            has_more = len(series_list) == cached_limit
+
+        return schemas.HardcoverPopularSeriesResponse(
+            series=series_list,
+            total=total,
+            has_more=has_more,
+            offset=cached_offset,
+            limit=cached_limit
+        )
     
     try:
-        fetch_limit = min(limit * 10, 200)
+        fetch_limit = min((offset + limit) * 10, 500)
         
         graphql_query = """
         query PopularSeries($limit: Int!) {
@@ -2551,11 +2571,12 @@ async def get_popular_series(
         # Sort by total activities_count
         series_with_activity.sort(key=lambda x: (x["total_activities_count"], x["books_count"]), reverse=True)
         
-        # Take top N series
-        top_series = series_with_activity[:limit]
+        total = len(series_with_activity)
+        page_series = series_with_activity[offset:offset + limit]
+        has_more = len(page_series) == limit
         
         # Get owned counts from database for each series
-        series_ids = [s["id"] for s in top_series]
+        series_ids = [s["id"] for s in page_series]
         owned_counts = _get_owned_counts_for_series(series_ids, db)
         
         # Transform to match schema
@@ -2567,10 +2588,16 @@ async def get_popular_series(
                 "owned_count": owned_counts.get(s["id"], 0),
                 "first_book": s["first_book"]
             }
-            for s in top_series
+            for s in page_series
         ]
         
-        response = schemas.HardcoverPopularSeriesResponse(series=series_list)
+        response = schemas.HardcoverPopularSeriesResponse(
+            series=series_list,
+            total=total,
+            has_more=has_more,
+            offset=offset,
+            limit=limit
+        )
         
         # Cache the result
         await cache.set_cached(

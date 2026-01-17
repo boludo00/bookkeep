@@ -181,11 +181,12 @@ export const hardcoverApi = {
   getByAuthor: (bookId: number, limit: number = 10) =>
     apiRequest<{ books: any[] }>(`/api/hardcover/by-author/${bookId}?limit=${limit}`),
   
-  getPopularSeries: (limit: number = 20, minTotalRatings: number = 500) => {
+  getPopularSeries: (limit: number = 20, minTotalRatings: number = 500, offset: number = 0) => {
     const params = new URLSearchParams({
       limit: String(limit),
       min_total_ratings: String(minTotalRatings),
     });
+    if (offset > 0) params.set('offset', String(offset));
     return apiRequest<{ series: any[] }>(`/api/hardcover/popular-series?${params}`);
   },
 
@@ -299,7 +300,11 @@ export const requestsApi = {
       }
     ),
   
-  requestSeries: (seriesId: number, format: 'ebook' | 'audiobook' = 'ebook') =>
+  requestSeries: (
+    seriesId: number,
+    format: 'ebook' | 'audiobook' = 'ebook',
+    originalOnly: boolean = false
+  ) =>
     apiRequest<{
       series_id: number;
       format: string;
@@ -308,7 +313,7 @@ export const requestsApi = {
       already_available: number;
       already_requested: number;
       total_books: number;
-    }>(`/api/requests/series/${seriesId}?format=${format}`, {
+    }>(`/api/requests/series/${seriesId}?format=${format}${originalOnly ? '&original_only=true' : ''}`, {
       method: 'POST',
     }),
   

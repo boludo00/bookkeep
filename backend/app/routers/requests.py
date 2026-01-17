@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import Optional, List
 from datetime import datetime, timedelta, timezone
 import structlog
@@ -464,6 +465,7 @@ async def clear_requests_for_book(
 async def request_series(
     series_id: int,
     format: str = Query("ebook", description="Format to request: 'ebook' or 'audiobook'"),
+    original_only: bool = Query(False, description="Only request whole-number series positions"),
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(get_current_user)
 ):
@@ -478,9 +480,13 @@ async def request_series(
         )
     
     # Get all books in this series from the database
-    books_in_series = db.query(models.Book).filter(
-        models.Book.series_id == series_id
-    ).order_by(models.Book.series_position.asc().nulls_last()).all()
+    books_query = db.query(models.Book).filter(models.Book.series_id == series_id)
+    if original_only:
+        books_query = books_query.filter(
+            models.Book.series_position.isnot(None),
+            func.floor(models.Book.series_position) == models.Book.series_position
+        )
+    books_in_series = books_query.order_by(models.Book.series_position.asc().nulls_last()).all()
     
     if not books_in_series:
         raise HTTPException(
