@@ -15,6 +15,56 @@ import structlog
 
 logger = structlog.get_logger()
 
+
+def create_book_from_booklore_data(
+    title: str,
+    author: Optional[str],
+    description: Optional[str],
+    cover_url: Optional[str],
+    isbn: Optional[str],
+    page_count: Optional[int],
+    published_date: Optional[str],
+    hardcover_id: int,
+    hardcover_slug: Optional[str],
+    booklore_id: str,
+    booklore_added_on: Optional[datetime],
+    series_name: Optional[str],
+    series_id: Optional[int],
+    series_number: Optional[float],
+    rating: Optional[float],
+    ratings_count: Optional[int],
+    users_count: Optional[int],
+    genres: Optional[str],
+    format_type: str,
+) -> Book:
+    """
+    Helper function to create a Book instance from Booklore data.
+    Eliminates duplicate book creation logic.
+    """
+    return Book(
+        title=title,
+        author=author,
+        description=description,
+        cover_url=cover_url,
+        isbn=isbn,
+        page_count=page_count,
+        published_date=published_date,
+        hardcover_id=hardcover_id,
+        hardcover_slug=hardcover_slug,
+        booklore_id=booklore_id,
+        booklore_added_on=booklore_added_on,
+        series=series_name,
+        series_id=series_id,
+        series_position=series_number,
+        rating=rating,
+        ratings_count=ratings_count,
+        users_count=users_count,
+        genres=genres,
+        ebook_available=(format_type == "ebook"),
+        audiobook_available=(format_type == "audiobook"),
+    )
+
+
 async def refresh_seed_data():
     """Background task to fetch new books from Hardcover API using progressive offset"""
     import json
@@ -173,7 +223,7 @@ async def refresh_seed_data():
                 activities_count=hc_book.activities_count,
                 release_year=hc_book.release_year,
                 is_seed_data=True,
-                last_refreshed=datetime.now(),
+                last_refreshed=datetime.now(timezone.utc),
             )
             db.add(db_book)
             existing_ids.add(hardcover_id)  # Track to avoid duplicates in same batch
@@ -213,9 +263,9 @@ def update_job_execution(job_name: str, max_retries: int = 3):
         try:
             schedule = db.query(JobSchedule).filter(JobSchedule.job_name == job_name).first()
             if schedule:
-                schedule.last_execution = datetime.now()
+                schedule.last_execution = datetime.now(timezone.utc)
                 interval = schedule.interval_seconds or 3600
-                schedule.next_execution = datetime.now() + timedelta(seconds=interval)
+                schedule.next_execution = datetime.now(timezone.utc) + timedelta(seconds=interval)
                 db.commit()
             return  # Success
         except Exception as e:
@@ -251,15 +301,15 @@ def get_seconds_until_next_execution(job_name: str) -> int:
     try:
         schedule = db.query(JobSchedule).filter(JobSchedule.job_name == job_name).first()
         if schedule and schedule.next_execution:
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
             if schedule.next_execution > now:
                 return int((schedule.next_execution - now).total_seconds())
         # If no next_execution or it's in the past, check last_execution + interval
         if schedule and schedule.last_execution:
             interval = schedule.interval_seconds or 3600
             next_run = schedule.last_execution + timedelta(seconds=interval)
-            if next_run > datetime.now():
-                return int((next_run - datetime.now()).total_seconds())
+            if next_run > datetime.now(timezone.utc):
+                return int((next_run - datetime.now(timezone.utc)).total_seconds())
         return 0  # Run immediately if never run before
     except Exception:
         return 0
@@ -663,7 +713,7 @@ async def sync_from_booklore():
                                           title=title)
                             else:
                                 # Create new book with ISBN
-                                db_book = Book(
+                                db_book = create_book_from_booklore_data(
                                     title=title,
                                     author=author,
                                     description=description,
@@ -675,15 +725,14 @@ async def sync_from_booklore():
                                     hardcover_slug=hardcover_slug,
                                     booklore_id=booklore_id,
                                     booklore_added_on=booklore_added_on,
-                                    series=series_name,
+                                    series_name=series_name,
                                     series_id=series_id if hardcover_book_data else None,
-                                    series_position=series_number,
+                                    series_number=series_number,
                                     rating=rating,
                                     ratings_count=ratings_count,
                                     users_count=users_count,
                                     genres=genres,
-                                    ebook_available=(format_type == "ebook"),
-                                    audiobook_available=(format_type == "audiobook"),
+                                    format_type=format_type,
                                 )
                                 db.add(db_book)
                                 db.flush()
@@ -696,7 +745,7 @@ async def sync_from_booklore():
                                           has_hardcover_data=bool(hardcover_book_data))
                         else:
                             # Create new book without ISBN
-                            db_book = Book(
+                            db_book = create_book_from_booklore_data(
                                 title=title,
                                 author=author,
                                 description=description,
@@ -708,15 +757,14 @@ async def sync_from_booklore():
                                 hardcover_slug=hardcover_slug,
                                 booklore_id=booklore_id,
                                 booklore_added_on=booklore_added_on,
-                                series=series_name,
+                                series_name=series_name,
                                 series_id=series_id if hardcover_book_data else None,
-                                series_position=series_number,
+                                series_number=series_number,
                                 rating=rating,
                                 ratings_count=ratings_count,
                                 users_count=users_count,
                                 genres=genres,
-                                ebook_available=(format_type == "ebook"),
-                                audiobook_available=(format_type == "audiobook"),
+                                format_type=format_type,
                             )
                             db.add(db_book)
                             db.flush()
@@ -985,7 +1033,7 @@ async def sync_missing_metadata():
                         if genres:
                             book.genres = genres
                     
-                    book.last_refreshed = datetime.now()
+                    book.last_refreshed = datetime.now(timezone.utc)
                     db.add(book)
                     
                     try:

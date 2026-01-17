@@ -131,7 +131,7 @@ async def create_request(
         db_request.readarr_search_status_code = None
         db_request.readarr_message = None
         db_request.edition_id = request.edition_id
-        db_request.updated_at = datetime.now()
+        db_request.updated_at = datetime.now(timezone.utc)
         db.add(db_request)
         db.commit()
         db.refresh(db_request)
@@ -556,7 +556,7 @@ async def request_series(
         initial_status = "approved" if should_auto_approve else "requested"
         
         # Create the request
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         new_request = models.BookRequest(
             book_id=book.id,
             user_id=current_user.id,

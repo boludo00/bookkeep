@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from 'react';
+import { useRef, useState } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Star, Calendar, BookOpen, Tag, Clock, Users, Headphones, Library, ExternalLink, Trash2 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -28,22 +28,15 @@ export default function BookDetails() {
   const hardcoverId = book?.hardcoverId ?? (book?.id ? Number(book.id) : undefined);
   const hasHardcoverId = Number.isFinite(hardcoverId);
 
-  const { data: requestStatus, refetch } = useQuery({
+  const { data: requestStatus } = useQuery({
     queryKey: ['requests', 'by-hardcover', hardcoverId],
     queryFn: () => requestsApi.getByHardcoverId(hardcoverId as number),
     enabled: hasHardcoverId,
-    staleTime: 0, // Always fetch fresh data when navigating to this page
-    refetchOnMount: 'always', // Force refetch every time component mounts
-    refetchInterval: hasHardcoverId ? 15000 : false,
-    gcTime: 0, // Don't cache this query at all
+    staleTime: 15 * 1000, // Cache for 15 seconds - balanced for real-time updates
+    refetchOnMount: true, // Refetch on mount but use cache if fresh
+    refetchInterval: hasHardcoverId ? 30000 : false, // Poll every 30s instead of 15s
+    gcTime: 5 * 60 * 1000, // Keep in cache for 5 minutes
   });
-
-  // Force a manual refetch on mount as an extra safeguard
-  useEffect(() => {
-    if (hasHardcoverId) {
-      refetch();
-    }
-  }, [hardcoverId, refetch, hasHardcoverId]);
 
   const hasAnyRequestsForReadarr = Boolean(requestStatus?.ebook || requestStatus?.audiobook);
   const { data: readarrManageLink } = useQuery({

@@ -6,17 +6,9 @@ import { booksApi, readarrApi, requestsApi } from '@/lib/api';
 import { getPopularSeries, getSeriesBooks, normalizeSeriesBooks, transformHardcoverBook } from '@/lib/hardcover';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAvailabilityPolling } from '@/hooks/useAvailabilityPolling';
-import type { Book } from '@/types/book';
+import type { Book, SeriesItem, RequestStatus, AvailabilityBatchResponse, RequestStatusBatchResponse } from '@/types/book';
 
 const SERIES_PAGE_SIZE = 24;
-
-interface SeriesItem {
-  id: number;
-  name: string;
-  books_count: number;
-  owned_count?: number;
-  first_book: any;
-}
 
 export default function Series() {
   const {
@@ -134,7 +126,7 @@ export default function Series() {
     return map;
   }, [seriesBooksById]);
 
-  const { data: availabilityBatch } = useQuery({
+  const { data: availabilityBatch } = useQuery<AvailabilityBatchResponse>({
     queryKey: ['readarr', 'availability', 'series-list', availabilityIds],
     queryFn: () => readarrApi.getAvailabilityBatch(availabilityIds, isbnMap),
     enabled: availabilityIds.length > 0,
@@ -148,16 +140,17 @@ export default function Series() {
   }, [availabilityBatch]);
 
   // Fetch request statuses for all books in all series
-  const { data: requestStatusBatch } = useQuery({
+  const { data: requestStatusBatch } = useQuery<RequestStatusBatchResponse>({
     queryKey: ['requests', 'by-hardcover', 'series-list', availabilityIds],
     queryFn: () => requestsApi.getByHardcoverBatch(availabilityIds),
     enabled: availabilityIds.length > 0,
-    staleTime: 0, // Always refetch after mutations to show updated request status
+    staleTime: 30 * 1000, // Cache for 30 seconds - balanced for UI updates
+    gcTime: 5 * 60 * 1000, // Keep in cache for 5 minutes
   });
 
   const requestStatusMap = useMemo(() => {
     return new Map(
-      requestStatusBatch?.results.map((item: any) => [item.hardcover_id, item]) ?? []
+      requestStatusBatch?.results.map((item) => [item.hardcover_id, item]) ?? []
     );
   }, [requestStatusBatch]);
 
@@ -166,8 +159,8 @@ export default function Series() {
     if (!requestStatusBatch?.results) return [];
 
     return requestStatusBatch.results
-      .filter((status: any) => status.ebook === 'processing' || status.audiobook === 'processing')
-      .flatMap((status: any) => {
+      .filter((status) => status.ebook === 'processing' || status.audiobook === 'processing')
+      .flatMap((status) => {
         const requests: Array<{ hardcoverId: number; format: 'ebook' | 'audiobook'; readarrBookId: number | null }> = [];
         if (status.ebook === 'processing') {
           requests.push({
@@ -277,9 +270,10 @@ export default function Series() {
                 typeof position === 'number' &&
                 Number.isFinite(position) &&
                 Math.floor(position) === position;
-              const originalBooks = seriesBooks.filter((book) =>
-                isWholePosition((book as any).position ?? book.seriesPosition)
-              );
+              const originalBooks = seriesBooks.filter((book) => {
+                const position = (book as Book & { position?: number }).position ?? book.seriesPosition;
+                return isWholePosition(position);
+              });
               const fallbackBook = series.first_book ? transformHardcoverBook(series.first_book) : null;
               const cover = seriesBooks[0]?.cover || fallbackBook?.cover || '/placeholder.svg';
             const author =
@@ -306,7 +300,7 @@ export default function Series() {
               const requestStatus = requestStatusMap.get(Number(hardcoverId));
               if (!requestStatus) return false;
 
-              const hasRequest = (requestStatus as any).ebook || (requestStatus as any).audiobook;
+              const hasRequest = requestStatus.ebook || requestStatus.audiobook;
               return hasRequest && !isAvailable(book);
             };
 

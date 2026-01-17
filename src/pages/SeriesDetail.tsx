@@ -12,7 +12,7 @@ import { BookCard } from '@/components/books/BookCard';
 import { toast } from 'sonner';
 import { useUser } from '@/contexts/UserContext';
 import { useAvailabilityPolling } from '@/hooks/useAvailabilityPolling';
-import type { Book } from '@/types/book';
+import type { Book, RequestStatusBatchResponse, AvailabilityBatchResponse, RequestStatus, AvailabilityStatus } from '@/types/book';
 
 export default function SeriesDetail() {
   const { id } = useParams();
@@ -60,27 +60,27 @@ export default function SeriesDetail() {
     return acc;
   }, {});
 
-  const { data: readarrAvailability } = useQuery({
+  const { data: readarrAvailability } = useQuery<AvailabilityBatchResponse>({
     queryKey: ['readarr', 'availability', 'series', id, hardcoverIds],
     queryFn: () => readarrApi.getAvailabilityBatch(hardcoverIds, isbnMap),
     enabled: hardcoverIds.length > 0,
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: requestStatuses, refetch: refetchRequestStatuses } = useQuery({
+  const { data: requestStatuses, refetch: refetchRequestStatuses } = useQuery<RequestStatusBatchResponse>({
     queryKey: ['requests', 'by-hardcover', 'series', id, hardcoverIds],
     queryFn: () => requestsApi.getByHardcoverBatch(hardcoverIds),
     enabled: hardcoverIds.length > 0,
-    staleTime: 0, // Always refetch after mutations to show updated request status
-    refetchOnMount: 'always', // Force refetch when component mounts
-    gcTime: 0, // Don't cache this query
+    staleTime: 30 * 1000, // Cache for 30 seconds - fresh enough for UI updates
+    refetchOnMount: true, // Refetch on mount but use cache if fresh
+    gcTime: 5 * 60 * 1000, // Keep in cache for 5 minutes
   });
 
-  const availabilityMap = new Map(
+  const availabilityMap = new Map<number, AvailabilityStatus>(
     readarrAvailability?.results.map((item) => [item.hardcover_id, item]) ?? []
   );
 
-  const requestStatusMap = new Map(
+  const requestStatusMap = new Map<number, RequestStatus>(
     requestStatuses?.results.map((item) => [item.hardcover_id, item]) ?? []
   );
 
@@ -89,8 +89,8 @@ export default function SeriesDetail() {
     if (!requestStatuses?.results) return [];
 
     return requestStatuses.results
-      .filter((status: any) => status.ebook === 'processing' || status.audiobook === 'processing')
-      .flatMap((status: any) => {
+      .filter((status) => status.ebook === 'processing' || status.audiobook === 'processing')
+      .flatMap((status) => {
         const requests: Array<{ hardcoverId: number; format: 'ebook' | 'audiobook'; readarrBookId: number | null }> = [];
         if (status.ebook === 'processing') {
           requests.push({
@@ -151,8 +151,8 @@ export default function SeriesDetail() {
     if (!requestStatus) return false; // No requests
 
     // Count as requested if there's an active request for any format (not denied)
-    const ebookStatus = (requestStatus as any).ebook;
-    const audiobookStatus = (requestStatus as any).audiobook;
+    const ebookStatus = requestStatus.ebook;
+    const audiobookStatus = requestStatus.audiobook;
 
     return (ebookStatus && ebookStatus !== 'denied') || (audiobookStatus && audiobookStatus !== 'denied');
   }).length;
