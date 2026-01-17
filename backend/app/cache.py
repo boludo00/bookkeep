@@ -27,8 +27,9 @@ CACHE_TTL = {
     "book_prompts": None, # never expire - prompt summaries are stable
     "author": 86400, # 24 hours
     "search_grouped": 1800, # 30 minutes
-    "readarr_library": 60, # 1 minute
-    "requests_by_hardcover": 30, # 30 seconds
+    "readarr_library": 600, # 10 minutes
+    "requests_by_hardcover": 300, # 5 minutes
+    "requests_by_hardcover_batch": 300, # 5 minutes
 }
 
 # Initialize cache - try Redis first, fallback to memory

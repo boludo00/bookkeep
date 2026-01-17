@@ -13,6 +13,8 @@ interface BookCardProps {
   status?: 'available' | 'requested' | 'none';
   showRating?: boolean;
   enableRequestStatus?: boolean;
+  showRequestButton?: boolean;
+  requestStatus?: { ebook?: string | null; audiobook?: string | null };
 }
 
 export function BookCard({
@@ -20,6 +22,8 @@ export function BookCard({
   status = 'none',
   showRating = true,
   enableRequestStatus = false,
+  showRequestButton = true,
+  requestStatus,
 }: BookCardProps) {
   const [requestOpen, setRequestOpen] = useState(false);
   const { data: existingRequests } = useQuery({
@@ -34,8 +38,9 @@ export function BookCard({
   const ebookAvailable = book.ebookAvailable || false;
   const audiobookAvailable = book.audiobookAvailable || false;
   const isAnyFormatAvailable = ebookAvailable || audiobookAvailable;
-  const requestStatuses = enableRequestStatus
-    ? [existingRequests?.ebook, existingRequests?.audiobook].filter((value): value is string => !!value)
+  const statusSource = requestStatus || (enableRequestStatus ? existingRequests : null);
+  const requestStatuses = statusSource
+    ? [statusSource.ebook, statusSource.audiobook].filter((value): value is string => !!value)
     : [];
   const hasActiveRequest = enableRequestStatus
     ? requestStatuses.some((value) => value !== 'not_found' && value !== 'available')
@@ -109,7 +114,7 @@ export function BookCard({
           </div>
         </Link>
 
-        {!isAnyFormatAvailable && (
+        {!isAnyFormatAvailable && showRequestButton && (
           <div className="absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
             <Button
               size="sm"
@@ -126,7 +131,7 @@ export function BookCard({
           </div>
         )}
       </div>
-      {book.hardcoverId && (
+      {book.hardcoverId && showRequestButton && (
         <RequestDialog book={book} open={requestOpen} onOpenChange={setRequestOpen} />
       )}
     </>

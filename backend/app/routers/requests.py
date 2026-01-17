@@ -7,7 +7,12 @@ from app import database, models, schemas
 from app.cache import get_cached, set_cached, delete_cached, make_cache_key, CACHE_TTL
 from app.auth import get_current_user, require_admin
 from app.routers.readarr import add_book_to_readarr
-from app.services.readarr_service import ReadarrClient, get_readarr_server_for_format
+from app.services.readarr_service import (
+    ReadarrClient,
+    get_readarr_server_for_format,
+    is_format_available_in_readarr,
+    get_readarr_availability_map,
+)
 from app.routers.users import get_password_hash
 
 logger = structlog.get_logger(__name__)
@@ -51,6 +56,23 @@ async def create_request(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"You do not have permission to request {request.format}s"
         )
+
+    # Block requests for formats already available in Readarr
+    try:
+        if book.hardcover_id and await is_format_available_in_readarr(
+            db,
+            book.hardcover_id,
+            request.format,
+            isbns=[book.isbn] if book.isbn else None,
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"{request.format.capitalize()} already available in Readarr."
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning("readarr_availability_check_failed", error=str(e))
 
     # Check if this book+format already has a request (global - any user)
     # Only allow new requests if existing ones are denied or don't exist
@@ -292,9 +314,19 @@ async def get_requests_for_hardcover_book(
     ).all()
     
     # Build a response with format status
-    result = {"ebook": None, "audiobook": None, "book_id": book.id}
+    result = {
+        "ebook": None,
+        "audiobook": None,
+        "ebook_readarr_book_id": None,
+        "audiobook_readarr_book_id": None,
+        "book_id": book.id,
+    }
     for r in requests:
         result[r.format] = r.status
+        if r.format == "ebook":
+            result["ebook_readarr_book_id"] = r.readarr_book_id
+        elif r.format == "audiobook":
+            result["audiobook_readarr_book_id"] = r.readarr_book_id
     
     logger.debug("requests_for_hardcover_book", 
                 hardcover_id=hardcover_id, 
@@ -303,6 +335,47 @@ async def get_requests_for_hardcover_book(
                 audiobook=result["audiobook"])
     await set_cached(cache_key, result, ttl=CACHE_TTL.get("requests_by_hardcover", 30))
     return result
+
+
+@router.post("/by-hardcover/batch")
+async def get_requests_for_hardcover_batch(
+    payload: schemas.ReadarrAvailabilityBatchRequest,
+    db: Session = Depends(database.get_db),
+):
+    """Get request status for multiple hardcover IDs."""
+    hardcover_ids = list({int(book_id) for book_id in payload.hardcover_ids if book_id is not None})
+    if not hardcover_ids:
+        return {"results": []}
+
+    ids_key = ",".join(str(book_id) for book_id in sorted(hardcover_ids))
+    cache_key = make_cache_key("requests_by_hardcover_batch", ids=ids_key)
+    cached = await get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    results_map = {
+        hardcover_id: {"hardcover_id": hardcover_id, "ebook": None, "audiobook": None}
+        for hardcover_id in hardcover_ids
+    }
+
+    rows = (
+        db.query(models.Book.hardcover_id, models.BookRequest.format, models.BookRequest.status)
+        .join(models.BookRequest, models.BookRequest.book_id == models.Book.id)
+        .filter(models.Book.hardcover_id.in_(hardcover_ids))
+        .filter(models.BookRequest.status != "denied")
+        .all()
+    )
+
+    for hardcover_id, format_value, status_value in rows:
+        entry = results_map.get(hardcover_id)
+        if not entry:
+            continue
+        if format_value in ["ebook", "audiobook"]:
+            entry[format_value] = status_value
+
+    response = {"results": list(results_map.values())}
+    await set_cached(cache_key, response, ttl=CACHE_TTL.get("requests_by_hardcover_batch", 300))
+    return response
 
 
 @router.delete("/by-hardcover/{hardcover_id}")
@@ -419,10 +492,28 @@ async def request_series(
     skipped_count = 0
     already_available = 0
     already_requested = 0
+
+    availability_map = {}
+    hardcover_ids = [book.hardcover_id for book in books_in_series if book.hardcover_id]
+    isbn_map = {
+        int(book.hardcover_id): [book.isbn]
+        for book in books_in_series
+        if book.hardcover_id and book.isbn
+    }
+    if hardcover_ids:
+        try:
+            availability_map = await get_readarr_availability_map(db, hardcover_ids, isbn_map=isbn_map)
+        except Exception as e:
+            logger.warning("series_readarr_availability_failed", error=str(e))
     
     for book in books_in_series:
-        # Check if book is already available for this format
-        if format == "ebook" and book.ebook_available:
+        # Check if book is already available for this format (Readarr preferred)
+        readarr_availability = availability_map.get(book.hardcover_id or 0, {})
+        readarr_has_format = (
+            (format == "ebook" and readarr_availability.get("ebook"))
+            or (format == "audiobook" and readarr_availability.get("audiobook"))
+        )
+        if readarr_has_format or (format == "ebook" and book.ebook_available):
             already_available += 1
             skipped_count += 1
             continue

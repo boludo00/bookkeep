@@ -49,6 +49,34 @@ export default function BookDetails() {
     refetchInterval: hasHardcoverId ? 15000 : false,
   });
 
+  const ebookRequestStatus = requestStatus?.ebook ?? null;
+  const audiobookRequestStatus = requestStatus?.audiobook ?? null;
+  const ebookRequestAvailable = ebookRequestStatus === 'available';
+  const audiobookRequestAvailable = audiobookRequestStatus === 'available';
+
+  const ebookReadarrBookId = requestStatus?.ebook_readarr_book_id;
+  const audiobookReadarrBookId = requestStatus?.audiobook_readarr_book_id;
+  const shouldCheckEbookReadarr =
+    Boolean(ebookReadarrBookId) && ebookRequestStatus !== 'available';
+  const shouldCheckAudiobookReadarr =
+    Boolean(audiobookReadarrBookId) && audiobookRequestStatus !== 'available';
+
+  const { data: ebookReadarrAvailability } = useQuery({
+    queryKey: ['readarr', 'availability', 'readarr', ebookReadarrBookId],
+    queryFn: () =>
+      readarrApi.getAvailabilityByReadarrId(ebookReadarrBookId as number, 'ebook'),
+    enabled: shouldCheckEbookReadarr,
+    refetchInterval: shouldCheckEbookReadarr ? 15000 : false,
+  });
+
+  const { data: audiobookReadarrAvailability } = useQuery({
+    queryKey: ['readarr', 'availability', 'readarr', audiobookReadarrBookId],
+    queryFn: () =>
+      readarrApi.getAvailabilityByReadarrId(audiobookReadarrBookId as number, 'audiobook'),
+    enabled: shouldCheckAudiobookReadarr,
+    refetchInterval: shouldCheckAudiobookReadarr ? 15000 : false,
+  });
+
   const { data: promptSummaries = [] } = useBookPrompts(
     hasHardcoverId ? (hardcoverId as number) : undefined,
     4,
@@ -142,14 +170,18 @@ export default function BookDetails() {
     return html.replace(/<[^>]*>/g, '').trim();
   };
 
-  const ebookRequestStatus = requestStatus?.ebook ?? null;
-  const audiobookRequestStatus = requestStatus?.audiobook ?? null;
-  const ebookRequestAvailable = ebookRequestStatus === 'available';
-  const audiobookRequestAvailable = audiobookRequestStatus === 'available';
   const ebookAvailable =
-    book.ebookAvailable || ebookRequestAvailable || readarrAvailability?.ebook || false;
+    book.ebookAvailable ||
+    ebookRequestAvailable ||
+    readarrAvailability?.ebook ||
+    ebookReadarrAvailability?.available ||
+    false;
   const audiobookAvailable =
-    book.audiobookAvailable || audiobookRequestAvailable || readarrAvailability?.audiobook || false;
+    book.audiobookAvailable ||
+    audiobookRequestAvailable ||
+    readarrAvailability?.audiobook ||
+    audiobookReadarrAvailability?.available ||
+    false;
   const ebookNotFound = ebookRequestStatus === 'not_found';
   const audiobookNotFound = audiobookRequestStatus === 'not_found';
   const ebookRequested =
@@ -448,7 +480,7 @@ export default function BookDetails() {
                             key={promptBook.id}
                             className="flex-shrink-0 w-[140px] sm:w-[160px]"
                           >
-                            <BookCard book={promptBook} showRating={false} />
+                            <BookCard book={promptBook} showRating={false} showRequestButton={false} />
                           </div>
                         ))}
                       </div>

@@ -276,12 +276,27 @@ export const requestsApi = {
     apiRequest<{ ebook: string | null; audiobook: string | null }>(`/api/requests/by-book/${bookId}`),
   
   getByHardcoverId: (hardcoverId: number) =>
-    apiRequest<{ ebook: string | null; audiobook: string | null; book_id: number | null }>(`/api/requests/by-hardcover/${hardcoverId}`),
+    apiRequest<{
+      ebook: string | null;
+      audiobook: string | null;
+      ebook_readarr_book_id: number | null;
+      audiobook_readarr_book_id: number | null;
+      book_id: number | null;
+    }>(`/api/requests/by-hardcover/${hardcoverId}`),
   
   clearByHardcoverId: (hardcoverId: number, format?: 'ebook' | 'audiobook') =>
     apiRequest<{ message: string; deleted_count: number; formats: string[] }>(
       `/api/requests/by-hardcover/${hardcoverId}${format ? `?format=${format}` : ''}`,
       { method: 'DELETE' }
+    ),
+
+  getByHardcoverBatch: (hardcoverIds: number[]) =>
+    apiRequest<{ results: Array<{ hardcover_id: number; ebook: string | null; audiobook: string | null }> }>(
+      '/api/requests/by-hardcover/batch',
+      {
+        method: 'POST',
+        body: JSON.stringify({ hardcover_ids: hardcoverIds }),
+      }
     ),
   
   requestSeries: (seriesId: number, format: 'ebook' | 'audiobook' = 'ebook') =>
@@ -418,13 +433,18 @@ export const readarrApi = {
   getAvailability: (hardcoverId: number) =>
     apiRequest<{ ebook: boolean; audiobook: boolean }>(`/api/readarr/availability/${hardcoverId}`),
 
-  getAvailabilityBatch: (hardcoverIds: number[]) =>
+  getAvailabilityBatch: (hardcoverIds: number[], isbnMap?: Record<number, string[]>) =>
     apiRequest<{ results: Array<{ hardcover_id: number; ebook: boolean; audiobook: boolean }> }>(
       '/api/readarr/availability/batch',
       {
         method: 'POST',
-        body: JSON.stringify({ hardcover_ids: hardcoverIds }),
+        body: JSON.stringify({ hardcover_ids: hardcoverIds, isbn_map: isbnMap }),
       }
+    ),
+
+  getAvailabilityByReadarrId: (readarrBookId: number, format: 'ebook' | 'audiobook') =>
+    apiRequest<{ available: boolean; readarr_book_id: number; format: string }>(
+      `/api/readarr/availability/readarr/${readarrBookId}?format=${format}`
     ),
 
   getManageLink: (hardcoverId: number, format?: 'ebook' | 'audiobook') =>
