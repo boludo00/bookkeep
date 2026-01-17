@@ -104,7 +104,7 @@ export default function SeriesDetail() {
   // Request series mutation
   const requestSeriesMutation = useMutation({
     mutationFn: (format: 'ebook' | 'audiobook') => 
-      requestsApi.requestSeries(Number(id), format),
+      requestsApi.requestSeries(Number(id), format, seriesView === 'original'),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['requests'] });
       queryClient.invalidateQueries({ queryKey: ['series', id] });

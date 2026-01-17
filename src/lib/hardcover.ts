@@ -100,8 +100,12 @@ export async function getBooksByAuthor(bookId: number, limit: number = 10) {
   return hardcoverApi.getByAuthor(bookId, limit);
 }
 
-export async function getPopularSeries(limit: number = 20, minTotalRatings: number = 500) {
-  return hardcoverApi.getPopularSeries(limit, minTotalRatings);
+export async function getPopularSeries(
+  limit: number = 20,
+  minTotalRatings: number = 500,
+  offset: number = 0
+) {
+  return hardcoverApi.getPopularSeries(limit, minTotalRatings, offset);
 }
 
 // Helper to transform Hardcover book to our app's Book format
