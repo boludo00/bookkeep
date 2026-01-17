@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { BookOpen, CheckCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useQueries, useQuery } from '@tanstack/react-query';
-import { booksApi } from '@/lib/api';
+import { booksApi, readarrApi } from '@/lib/api';
 import { getPopularSeries, getSeriesBooks, normalizeSeriesBooks, transformHardcoverBook } from '@/lib/hardcover';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { Book } from '@/types/book';
@@ -59,6 +59,60 @@ export default function Series() {
     })),
   });
 
+  const seriesBooksById = useMemo(() => {
+    return seriesList.map((series, index) => {
+      const seriesDetail = seriesQueries[index]?.data?.series_by_pk;
+      const seriesContext = {
+        id: seriesDetail?.id ?? series.id,
+        name: seriesDetail?.name ?? series.name,
+      };
+      const seriesBooks = seriesDetail?.book_series
+        ? normalizeSeriesBooks(seriesDetail.book_series, seriesContext)
+        : [];
+      return { series, seriesDetail, seriesBooks };
+    });
+  }, [seriesList, seriesQueries]);
+
+  const availabilityIds = useMemo(() => {
+    const ids = new Set<number>();
+    seriesBooksById.forEach(({ seriesBooks }) => {
+      seriesBooks.forEach((book) => {
+        const hardcoverId = book.hardcoverId ?? Number(book.id);
+        if (Number.isFinite(hardcoverId)) {
+          ids.add(Number(hardcoverId));
+        }
+      });
+    });
+    return Array.from(ids);
+  }, [seriesBooksById]);
+
+  const isbnMap = useMemo(() => {
+    const map: Record<number, string[]> = {};
+    seriesBooksById.forEach(({ seriesBooks }) => {
+      seriesBooks.forEach((book) => {
+        const hardcoverId = book.hardcoverId ?? Number(book.id);
+        if (!Number.isFinite(hardcoverId) || !book.isbn) {
+          return;
+        }
+        map[Number(hardcoverId)] = [book.isbn];
+      });
+    });
+    return map;
+  }, [seriesBooksById]);
+
+  const { data: availabilityBatch } = useQuery({
+    queryKey: ['readarr', 'availability', 'series-list', availabilityIds],
+    queryFn: () => readarrApi.getAvailabilityBatch(availabilityIds, isbnMap),
+    enabled: availabilityIds.length > 0,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const availabilityMap = useMemo(() => {
+    return new Map(
+      availabilityBatch?.results.map((item) => [item.hardcover_id, item]) ?? []
+    );
+  }, [availabilityBatch]);
+
   const isLoading = seriesLoading || booksLoading;
 
   return (
@@ -107,15 +161,7 @@ export default function Series() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {seriesList.map((series, index) => {
-            const seriesDetail = seriesQueries[index]?.data?.series_by_pk;
-            const seriesContext = {
-              id: seriesDetail?.id ?? series.id,
-              name: seriesDetail?.name ?? series.name,
-            };
-            const seriesBooks = seriesDetail?.book_series
-              ? normalizeSeriesBooks(seriesDetail.book_series, seriesContext)
-              : [];
+          {seriesBooksById.map(({ series, seriesDetail, seriesBooks }, index) => {
             const isWholePosition = (position?: number | null) =>
               typeof position === 'number' &&
               Number.isFinite(position) &&
@@ -133,7 +179,15 @@ export default function Series() {
             const ownedBooks = originalBooks.length > 0 ? originalBooks : seriesBooks;
             const ownedCount =
               ownedBooks.length > 0
-                ? ownedBooks.filter((book) => book.ebookAvailable || book.audiobookAvailable).length
+                ? ownedBooks.filter((book) => {
+                    const hardcoverId = book.hardcoverId ?? Number(book.id);
+                    const match = Number.isFinite(hardcoverId)
+                      ? availabilityMap.get(Number(hardcoverId))
+                      : undefined;
+                    const ebookAvailable = book.ebookAvailable || match?.ebook;
+                    const audiobookAvailable = book.audiobookAvailable || match?.audiobook;
+                    return ebookAvailable || audiobookAvailable;
+                  }).length
                 : series.owned_count || 0;
             const totalCount =
               originalBooks.length > 0
