@@ -1,14 +1,15 @@
 import { useRef, useState } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Star, Calendar, BookOpen, Tag, Clock, Users, Headphones, Library, ExternalLink, Trash2 } from 'lucide-react';
+import { ArrowLeft, Star, Calendar, BookOpen, Tag, Clock, Users, Headphones, Library, ExternalLink, Trash2, Search } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { RequestDialog } from '@/components/books/RequestDialog';
+import { SearchReleaseDialog } from '@/components/books/SearchReleaseDialog';
 import { BookCard } from '@/components/books/BookCard';
 import { useBookDetails, useBookPrompts } from '@/hooks/useHardcoverBooks';
-import { requestsApi, readarrApi } from '@/lib/api';
+import { requestsApi, readarrApi, booksApi } from '@/lib/api';
 import { transformHardcoverBook } from '@/lib/hardcover';
 import { toast } from 'sonner';
 import { useUser } from '@/contexts/UserContext';
@@ -17,6 +18,8 @@ export default function BookDetails() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
   const [requestOpen, setRequestOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchFormat, setSearchFormat] = useState<'ebook' | 'audiobook'>('ebook');
   const [promptViewCounts, setPromptViewCounts] = useState<Record<string, number>>({});
   const promptScrollLocks = useRef<Record<string, boolean>>({});
   const queryClient = useQueryClient();
@@ -27,6 +30,20 @@ export default function BookDetails() {
   const { data: book, isLoading, error } = useBookDetails(id);
   const hardcoverId = book?.hardcoverId ?? (book?.id ? Number(book.id) : undefined);
   const hasHardcoverId = Number.isFinite(hardcoverId);
+
+  // Query our database to get actual book data including download status
+  const { data: dbBook } = useQuery({
+    queryKey: ['book', 'by-hardcover', hardcoverId],
+    queryFn: async () => {
+      if (!hardcoverId) return null;
+      // Get all books and find by hardcover_id
+      const books = await booksApi.getAll(0, 1000);
+      return books.find((b: any) => b.hardcover_id === hardcoverId) || null;
+    },
+    enabled: hasHardcoverId,
+    staleTime: 5 * 1000, // Cache for 5 seconds to see downloads quickly
+    refetchInterval: hasHardcoverId ? 5000 : false, // Poll every 5s for download updates
+  });
 
   const { data: requestStatus } = useQuery({
     queryKey: ['requests', 'by-hardcover', hardcoverId],
@@ -174,12 +191,14 @@ export default function BookDetails() {
   };
 
   const ebookAvailable =
+    dbBook?.ebook_available ||
     book.ebookAvailable ||
     ebookRequestAvailable ||
     readarrAvailability?.ebook ||
     ebookReadarrAvailability?.available ||
     false;
   const audiobookAvailable =
+    dbBook?.audiobook_available ||
     book.audiobookAvailable ||
     audiobookRequestAvailable ||
     readarrAvailability?.audiobook ||
@@ -329,18 +348,32 @@ export default function BookDetails() {
               {/* Actions */}
               <div className="flex flex-wrap gap-3 pt-2">
                 {!hasAnyRequests && hasMissingFormat && canRequestAnything && (
-                  <Button
-                    size="lg"
-                    onClick={() => setRequestOpen(true)}
-                    className="bg-primary hover:bg-primary/90 glow-primary"
-                  >
-                    <Clock className="h-4 w-4 mr-2" />
-                    {preferredFormat === 'ebook'
-                      ? 'Request eBook'
-                      : preferredFormat === 'audiobook'
-                        ? 'Request Audiobook'
-                        : 'Request Book'}
-                  </Button>
+                  <>
+                    <Button
+                      size="lg"
+                      onClick={() => setRequestOpen(true)}
+                      className="bg-primary hover:bg-primary/90 glow-primary"
+                    >
+                      <Clock className="h-4 w-4 mr-2" />
+                      {preferredFormat === 'ebook'
+                        ? 'Request eBook'
+                        : preferredFormat === 'audiobook'
+                          ? 'Request Audiobook'
+                          : 'Request Book'}
+                    </Button>
+                    <Button
+                      size="lg"
+                      variant="outline"
+                      onClick={() => {
+                        setSearchFormat(preferredFormat || 'ebook');
+                        setSearchOpen(true);
+                      }}
+                      className="border-border hover:bg-accent"
+                    >
+                      <Search className="h-4 w-4 mr-2" />
+                      Search Book
+                    </Button>
+                  </>
                 )}
                 {hasAnyRequests && !ebookAvailable && !audiobookAvailable && (
                   <div className="inline-flex items-center gap-2 rounded-full border border-primary/40 bg-primary/10 px-4 py-2 text-sm font-medium text-primary">
@@ -506,6 +539,29 @@ export default function BookDetails() {
             audiobook: audiobookAvailable,
           }}
         />
+
+        {searchOpen && (
+          <SearchReleaseDialog
+            book={{
+              id: dbBook?.id ?? requestStatus?.book_id ?? undefined,
+              hardcoverId: hardcoverId,
+              title: book.title,
+              author: book.author,
+              isbn: book.isbn,
+              description: book.description,
+              cover: book.cover,
+              publishedDate: book.publishedDate,
+              rating: book.rating,
+              pageCount: book.pageCount,
+              series: book.series,
+              seriesPosition: book.seriesPosition,
+              genres: book.genres,
+            }}
+            open={searchOpen}
+            onOpenChange={setSearchOpen}
+            formatType={searchFormat}
+          />
+        )}
     </>
   );
 }

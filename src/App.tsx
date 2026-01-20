@@ -9,6 +9,7 @@ import Discover from "@/pages/Discover";
 import Browse from "@/pages/Browse";
 import BookDetails from "@/pages/BookDetails";
 import Requests from "@/pages/Requests";
+import Downloads from "@/pages/Downloads";
 import Admin from "@/pages/Admin";
 import Users from "@/pages/Users";
 import Settings from "@/pages/Settings";
@@ -44,6 +45,7 @@ const App = () => (
                   <Route path="/book/:id" element={<BookDetails />} />
                   <Route path="/search" element={<SearchResults />} />
                   <Route path="/requests" element={<Requests />} />
+                  <Route path="/downloads" element={<Downloads />} />
                   <Route path="/series" element={<Series />} />
                   <Route path="/series/:id" element={<SeriesDetail />} />
                   <Route path="/author" element={<Author />} />

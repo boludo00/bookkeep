@@ -387,11 +387,20 @@ export const usersApi = {
 export const settingsApi = {
   getHardcoverToken: () =>
     apiRequest<{ hardcover_api_token: string | null; hardcover_api_token_source: string; has_hardcover_token: boolean }>('/api/settings/hardcover-token'),
-  
+
   setHardcoverToken: (token: string) =>
     apiRequest<{ message: string }>('/api/settings/hardcover-token', {
       method: 'PUT',
       body: JSON.stringify({ hardcover_api_token: token }),
+    }),
+
+  getDownloadPaths: () =>
+    apiRequest<{ ebook_download_path: string | null; audiobook_download_path: string | null }>('/api/settings/download-paths'),
+
+  updateDownloadPaths: (paths: { ebook_download_path?: string; audiobook_download_path?: string }) =>
+    apiRequest<{ message: string }>('/api/settings/download-paths', {
+      method: 'PUT',
+      body: JSON.stringify(paths),
     }),
 };
 
@@ -568,4 +577,208 @@ export const bookloreApi = {
   
   checkBook: (serverId: number, hardcoverId: number) =>
     apiRequest<{ available: boolean; book?: any }>(`/api/booklore/${serverId}/check/${hardcoverId}`),
+};
+
+// Download Settings API endpoints
+export interface ProwlarrServer {
+  id: number;
+  name: string;
+  host: string;
+  port: number;
+  use_ssl: boolean;
+  api_key: string;
+  url_base: string | null;
+  enabled: boolean;
+  is_default: boolean;
+}
+
+export interface DownloadClient {
+  id: number;
+  name: string;
+  type: string;
+  protocol: string;
+  host: string;
+  port: number;
+  use_ssl: boolean;
+  username: string | null;
+  password: string;
+  enabled: boolean;
+  priority: number;
+  category: string | null;
+  ebook_category: string | null;
+  audiobook_category: string | null;
+  path_mappings_json: string | null;
+}
+
+export interface ProwlarrTestResponse {
+  success: boolean;
+  error?: string;
+  indexers?: Array<any>;
+  total_indexers?: number;
+}
+
+export interface DownloadClientTestResponse {
+  success: boolean;
+  error?: string;
+  version?: string;
+  api_version?: string;
+}
+
+export const downloadSettingsApi = {
+  // Prowlarr endpoints
+  getProwlarrServers: () =>
+    apiRequest<Array<ProwlarrServer>>('/api/download-settings/prowlarr'),
+
+  createProwlarrServer: (server: { name: string; host: string; port?: number; use_ssl?: boolean; api_key: string; url_base?: string; enabled?: boolean; is_default?: boolean }) =>
+    apiRequest<ProwlarrServer>('/api/download-settings/prowlarr', {
+      method: 'POST',
+      body: JSON.stringify(server),
+    }),
+
+  updateProwlarrServer: (id: number, server: { name?: string; host?: string; port?: number; use_ssl?: boolean; api_key?: string; url_base?: string; enabled?: boolean; is_default?: boolean }) =>
+    apiRequest<ProwlarrServer>(`/api/download-settings/prowlarr/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(server),
+    }),
+
+  deleteProwlarrServer: (id: number) =>
+    apiRequest<{ message: string }>(`/api/download-settings/prowlarr/${id}`, {
+      method: 'DELETE',
+    }),
+
+  testProwlarrConnection: (config: { host: string; port: number; use_ssl: boolean; api_key: string; url_base?: string }) =>
+    apiRequest<ProwlarrTestResponse>('/api/download-settings/prowlarr/test', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    }),
+
+  // Download Client endpoints
+  getDownloadClients: () =>
+    apiRequest<Array<DownloadClient>>('/api/download-settings/download-clients'),
+
+  createDownloadClient: (client: { name: string; type: string; protocol: string; host: string; port: number; use_ssl?: boolean; username?: string; password?: string; enabled?: boolean; priority?: number; category?: string; ebook_category?: string; audiobook_category?: string; path_mappings_json?: string }) =>
+    apiRequest<DownloadClient>('/api/download-settings/download-clients', {
+      method: 'POST',
+      body: JSON.stringify(client),
+    }),
+
+  updateDownloadClient: (id: number, client: { name?: string; type?: string; protocol?: string; host?: string; port?: number; use_ssl?: boolean; username?: string; password?: string; enabled?: boolean; priority?: number; category?: string; ebook_category?: string; audiobook_category?: string; path_mappings_json?: string }) =>
+    apiRequest<DownloadClient>(`/api/download-settings/download-clients/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(client),
+    }),
+
+  deleteDownloadClient: (id: number) =>
+    apiRequest<{ message: string }>(`/api/download-settings/download-clients/${id}`, {
+      method: 'DELETE',
+    }),
+
+  testDownloadClient: (config: { type: string; protocol: string; host: string; port: number; use_ssl: boolean; username?: string; password?: string }) =>
+    apiRequest<DownloadClientTestResponse>('/api/download-settings/download-clients/test', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    }),
+};
+
+// Downloads API endpoints
+export interface ReleaseInfo {
+  title: string;
+  download_url: string;
+  protocol: string;
+  indexer: string;
+  size_bytes: number;
+  seeders: number | null;
+  format: string | null;
+  language: string | null;
+  quality_score: number;
+  published_date: string | null;
+  already_downloaded: boolean;
+}
+
+export interface SearchResponse {
+  book_id: number;
+  releases: ReleaseInfo[];
+  total: number;
+}
+
+export interface DownloadResponse {
+  task_id: number;
+  status: string;
+  message: string;
+}
+
+export interface DownloadTask {
+  id: number;
+  book_id: number;
+  format: string;
+  source: string;
+  release_title: string;
+  download_url: string;
+  protocol: string;
+  state: string;
+  progress: number;
+  download_path: string | null;
+  created_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export const downloadsApi = {
+  // Search for releases via Prowlarr
+  searchReleases: (bookId: number, formatType: 'ebook' | 'audiobook') =>
+    apiRequest<SearchResponse>(`/api/downloads/search/${bookId}?format_type=${formatType}`, {
+      method: 'POST',
+    }),
+
+  // Manually download a specific release
+  downloadRelease: (request: {
+    book_id: number;
+    format_type: string;
+    download_url: string;
+    protocol: string;
+    release_title: string;
+    indexer: string;
+    size_bytes: number;
+  }) =>
+    apiRequest<DownloadResponse>('/api/downloads/download', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    }),
+
+  // Automatically download the best release
+  autoDownload: (bookId: number, formatType: 'ebook' | 'audiobook') =>
+    apiRequest<DownloadResponse>(`/api/downloads/auto-download/${bookId}?format_type=${formatType}`, {
+      method: 'POST',
+    }),
+
+  // Get download tasks
+  getTasks: (skip?: number, limit?: number, state?: string) => {
+    const params = new URLSearchParams();
+    if (skip !== undefined) params.set('skip', String(skip));
+    if (limit !== undefined) params.set('limit', String(limit));
+    if (state) params.set('state', state);
+    const query = params.toString();
+    return apiRequest<DownloadTask[]>(`/api/downloads/tasks${query ? `?${query}` : ''}`);
+  },
+
+  // Manually import a download to the configured destination
+  importDownload: (taskId: number) =>
+    apiRequest<{ success: boolean; message: string; destination_path: string }>(
+      `/api/downloads/import/${taskId}`,
+      { method: 'POST' }
+    ),
+
+  // Delete a single download task
+  deleteTask: (taskId: number) =>
+    apiRequest<{ success: boolean; message: string }>(
+      `/api/downloads/task/${taskId}`,
+      { method: 'DELETE' }
+    ),
+
+  // Clear all eligible download tasks
+  clearTasks: () =>
+    apiRequest<{ success: boolean; message: string; deleted_count: number }>(
+      '/api/downloads/tasks/clear',
+      { method: 'DELETE' }
+    ),
 };
