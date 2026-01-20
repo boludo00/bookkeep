@@ -13,4 +13,6 @@ structlog==24.1.0
 aiocache==0.12.2
 redis==5.0.1
 apscheduler==3.10.4
+qbittorrent-api>=2024.1.59
+requests>=2.31.0
 
