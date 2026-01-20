@@ -39,34 +39,35 @@ export function RequestCard({ request }: RequestCardProps) {
       </div>
 
       {/* Content */}
-      <div className="relative flex w-full p-4 gap-4">
+      <div className="relative flex w-full p-4 gap-3 sm:gap-4">
         {/* Cover */}
         <div className="flex-shrink-0">
           <img
             src={request.book.cover}
             alt={request.book.title}
-            className="h-28 w-20 rounded-lg object-cover shadow-lg"
+            className="h-24 w-16 sm:h-28 sm:w-20 rounded-lg object-cover shadow-lg"
           />
         </div>
 
         {/* Info */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-start justify-between gap-2">
-            <div>
-              <span className="text-sm text-muted-foreground">{year}</span>
-              <h3 className="font-semibold text-foreground mt-0.5 line-clamp-1">
-                {request.book.title}
-              </h3>
-            </div>
+        <div className="flex-1 min-w-0 flex flex-col gap-2">
+          {/* Title and Year */}
+          <div className="space-y-0.5">
+            <span className="text-xs sm:text-sm text-muted-foreground">{year}</span>
+            <h3 className="font-semibold text-foreground text-sm sm:text-base line-clamp-2">
+              {request.book.title}
+            </h3>
           </div>
 
-          <div className="flex items-center gap-2 mt-2 text-sm text-muted-foreground">
-            <User className="h-4 w-4" />
-            <span>{request.userName}</span>
+          {/* User Info */}
+          <div className="flex items-center gap-1.5 text-xs sm:text-sm text-muted-foreground">
+            <User className="h-3 w-3 sm:h-4 sm:w-4 flex-shrink-0" />
+            <span className="truncate">{request.userName}</span>
           </div>
 
-          <div className="flex items-center gap-2 mt-3">
-            <span className="text-xs text-muted-foreground">Status</span>
+          {/* Status Badge - with proper spacing */}
+          <div className="flex items-center gap-2 mt-auto pt-1">
+            <span className="text-xs text-muted-foreground flex-shrink-0">Status:</span>
             <Badge
               variant="outline"
               className={cn('text-xs border', status.className)}

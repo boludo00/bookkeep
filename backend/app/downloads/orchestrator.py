@@ -363,6 +363,13 @@ class DownloadOrchestrator:
         Returns:
             Destination path if successful, None otherwise
         """
+        from datetime import datetime, timezone
+
+        # Mark import as starting
+        task.import_status = 'importing'
+        task.import_message = 'Starting import...'
+        db.commit()
+
         try:
             # Get configured destination path based on format
             setting_key = f"{task.format}_download_path"  # e.g., "ebook_download_path"
@@ -413,6 +420,11 @@ class DownloadOrchestrator:
                     dest_path=str(dest_path),
                     message="Destination already exists, skipping copy"
                 )
+                # Mark as imported (already exists)
+                task.import_status = 'imported'
+                task.import_message = f'File already exists at destination: {dest_path.name}'
+                task.imported_at = datetime.now(timezone.utc)
+                db.commit()
                 return str(dest_path)
 
             # Try to hardlink first (fast, no extra space), fall back to copy
@@ -461,6 +473,12 @@ class DownloadOrchestrator:
                         dest=str(dest_path)
                     )
 
+            # Mark import as successful
+            task.import_status = 'imported'
+            task.import_message = f'Successfully imported to: {dest_path.name}'
+            task.imported_at = datetime.now(timezone.utc)
+            db.commit()
+
             return str(dest_path)
 
         except Exception as e:
@@ -469,6 +487,10 @@ class DownloadOrchestrator:
                 task_id=task.id,
                 error=str(e)
             )
+            # Mark import as failed
+            task.import_status = 'failed'
+            task.import_message = f'Import failed: {str(e)}'
+            db.commit()
             return None
 
     def _update_book_availability(self, task: DownloadTask, db: Session):

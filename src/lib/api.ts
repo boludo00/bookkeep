@@ -718,6 +718,9 @@ export interface DownloadTask {
   state: string;
   progress: number;
   download_path: string | null;
+  import_status?: string;
+  import_message?: string;
+  imported_at?: string | null;
   created_at: string | null;
   started_at: string | null;
   completed_at: string | null;

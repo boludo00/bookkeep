@@ -58,7 +58,7 @@ async def create_request(
             detail=f"You do not have permission to request {request.format}s"
         )
 
-    # Block requests for formats already available in Readarr
+    # Optional: Block requests for formats already available in Readarr (if configured)
     try:
         if book.hardcover_id and await is_format_available_in_readarr(
             db,
@@ -73,7 +73,8 @@ async def create_request(
     except HTTPException:
         raise
     except Exception as e:
-        logger.warning("readarr_availability_check_failed", error=str(e))
+        # Don't fail the request if Readarr check fails - just log it
+        logger.warning("readarr_availability_check_failed", error=str(e), book_id=book.id)
 
     # Check if this book+format already has a request (global - any user)
     # Only allow new requests if existing ones are denied or don't exist
@@ -155,70 +156,46 @@ async def create_request(
         joinedload(models.BookRequest.user)
     ).filter(models.BookRequest.id == db_request.id).first()
     
-    # Automatically add to Readarr if auto-approved or if manually approved
-    if auto_approve or db_request.status == "approved":
+    # Automatically trigger download if auto-approved
+    if auto_approve:
         try:
-            # Get appropriate Readarr server based on format
-            readarr_server = get_readarr_server_for_format(db_request.format, db)
-            
-            if readarr_server:
-                # Refresh server from database to ensure we have latest config
-                db.refresh(readarr_server)
-                logger.info("readarr_server_selected", 
-                           server_id=readarr_server.id,
-                           server_name=readarr_server.name,
-                           format=db_request.format,
-                           auto_approve=auto_approve)
-                # Add book to Readarr
-                try:
-                    result = await add_book_to_readarr(
-                        readarr_server,
-                        db_request.book,
-                        db_request.format,
-                        db,
-                        edition_id=db_request.edition_id
-                    )
-                    readarr_book_id = result.get("readarr_book_id")
-                    db_request.readarr_received = result.get("readarr_received")
-                    db_request.readarr_search_triggered = result.get("search_triggered")
-                    db_request.readarr_search_status_code = result.get("search_status_code")
-                    db_request.readarr_message = result.get("message")
-                    logger.info(
-                        "request_sent_to_readarr_on_create",
-                        request_id=db_request.id,
-                        readarr_book_id=readarr_book_id,
-                        server_id=readarr_server.id,
-                        auto_approve=auto_approve
-                    )
-                    # Update status to processing and store readarr_book_id
-                    db_request.status = "processing"
-                    if readarr_book_id:
-                        db_request.readarr_book_id = readarr_book_id
-                    db.commit()
-                    # Refresh to get updated status
-                    db.refresh(db_request)
-                except Exception as e:
-                    logger.error(
-                        "readarr_add_failed_on_create",
-                        request_id=db_request.id,
-                        error=str(e)
-                    )
-                    # If Readarr add fails, do not keep the request around.
-                    db.delete(db_request)
-                    db.commit()
-                    raise HTTPException(
-                        status_code=status.HTTP_502_BAD_GATEWAY,
-                        detail=f"Failed to add to Readarr: {str(e)}"
-                    )
-            else:
-                logger.warning(
-                    "request_created_no_readarr_server",
+            # Import download orchestrator
+            from app.downloads import DownloadOrchestrator
+
+            # Trigger automatic download via Prowlarr
+            orchestrator = DownloadOrchestrator(db_session=db)
+            task = orchestrator.search_and_download(
+                book=db_request.book,
+                format_type=db_request.format,
+                source_name="prowlarr"
+            )
+
+            if task:
+                logger.info(
+                    "auto_download_triggered",
                     request_id=db_request.id,
+                    task_id=task.id,
                     format=db_request.format
                 )
-                # Keep status as requested/approved if no Readarr server configured
-        except HTTPException:
-            raise
+                # Update status to processing since download started
+                db_request.status = "processing"
+                db.commit()
+                db.refresh(db_request)
+            else:
+                logger.warning(
+                    "auto_download_no_releases",
+                    request_id=db_request.id,
+                    book_id=db_request.book_id,
+                    format=db_request.format
+                )
+                # Keep as approved but log that no releases found
+        except Exception as e:
+            logger.error(
+                "auto_download_failed",
+                request_id=db_request.id,
+                error=str(e)
+            )
+            # Don't fail the request - just keep it as approved for manual fulfillment
         except Exception as e:
             logger.error("request_creation_error", request_id=db_request.id, error=str(e))
             # Don't fail the request creation, just log the error

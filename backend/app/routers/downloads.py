@@ -411,6 +411,9 @@ async def get_download_tasks(
             "download_path": task.download_path,
             "message": task.message,
             "client_state": task.client_state,
+            "import_status": task.import_status,
+            "import_message": task.import_message,
+            "imported_at": task.imported_at.isoformat() if task.imported_at else None,
             "created_at": task.created_at.isoformat() if task.created_at else None,
             "started_at": task.started_at.isoformat() if task.started_at else None,
             "completed_at": task.completed_at.isoformat() if task.completed_at else None,
@@ -471,8 +474,7 @@ async def import_download(
             release_hash = compute_release_hash(task.download_url)
             add_release_hash_to_book(db, task.book_id, release_hash)
 
-            # Delete the task after successful import to clean up downloads list
-            db.delete(task)
+            # Keep the task in history instead of deleting
             db.commit()
 
             # Extract filename from path
@@ -532,25 +534,12 @@ async def delete_task(
 
     # Check if task can be deleted
     if task.state in ["complete", "seeding"]:
-        # Check if it's been imported by looking for the release hash in the book
-        book = db.query(Book).filter(Book.id == task.book_id).first()
-        if book and book.downloaded_release_hashes:
-            import json
-            try:
-                hashes = json.loads(book.downloaded_release_hashes)
-                release_hash = compute_release_hash(task.download_url)
-
-                if release_hash not in hashes:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Cannot delete completed download that hasn't been imported yet"
-                    )
-            except (json.JSONDecodeError, TypeError):
-                # If we can't parse hashes, assume not imported
-                raise HTTPException(
-                    status_code=400,
-                    detail="Cannot delete completed download that hasn't been imported yet"
-                )
+        # Check if it's been imported using import_status field (most reliable)
+        if task.import_status != 'imported':
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot delete completed download that hasn't been imported yet (import status: {task.import_status or 'unknown'})"
+            )
 
     # Delete the task
     db.delete(task)
@@ -596,21 +585,11 @@ async def clear_tasks(
             tasks_to_delete.append(task)
             continue
 
-        # For completed tasks, check if imported
+        # For completed tasks, check if imported using import_status
         if task.state in ["complete", "seeding"]:
-            book = db.query(Book).filter(Book.id == task.book_id).first()
-            if book and book.downloaded_release_hashes:
-                import json
-                try:
-                    hashes = json.loads(book.downloaded_release_hashes)
-                    release_hash = compute_release_hash(task.download_url)
-
-                    # Only delete if imported
-                    if release_hash in hashes:
-                        tasks_to_delete.append(task)
-                except (json.JSONDecodeError, TypeError):
-                    # Skip if can't parse
-                    pass
+            # Only delete if successfully imported
+            if task.import_status == 'imported':
+                tasks_to_delete.append(task)
 
     # Delete all eligible tasks
     deleted_count = len(tasks_to_delete)

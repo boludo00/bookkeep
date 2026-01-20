@@ -28,6 +28,9 @@ interface DownloadTask {
   state: string;
   progress: number;
   download_path: string | null;
+  import_status?: string;
+  import_message?: string;
+  imported_at?: string | null;
   created_at: string | null;
   started_at: string | null;
   completed_at: string | null;
@@ -121,6 +124,62 @@ function getDetailedStatus(state: string, client_state?: string): string {
   };
 
   return stateMap[client_state] || client_state;
+}
+
+function getImportStatusBadgeVariant(status?: string): 'default' | 'secondary' | 'destructive' | 'outline' {
+  if (!status) return 'outline';
+
+  switch (status) {
+    case 'imported':
+      return 'default';
+    case 'importing':
+      return 'secondary';
+    case 'failed':
+      return 'destructive';
+    case 'pending':
+    case 'skipped':
+      return 'outline';
+    default:
+      return 'outline';
+  }
+}
+
+function getImportStatusIcon(status?: string) {
+  if (!status) return null;
+
+  switch (status) {
+    case 'imported':
+      return <CheckCircle className="h-4 w-4" />;
+    case 'importing':
+      return <RefreshCw className="h-4 w-4 animate-spin" />;
+    case 'failed':
+      return <XCircle className="h-4 w-4" />;
+    case 'pending':
+      return <Clock className="h-4 w-4" />;
+    case 'skipped':
+      return <Pause className="h-4 w-4" />;
+    default:
+      return null;
+  }
+}
+
+function getImportStatusLabel(status?: string): string {
+  if (!status) return 'Not Started';
+
+  switch (status) {
+    case 'pending':
+      return 'Pending';
+    case 'importing':
+      return 'Importing';
+    case 'imported':
+      return 'Imported';
+    case 'failed':
+      return 'Failed';
+    case 'skipped':
+      return 'Skipped';
+    default:
+      return status.toUpperCase();
+  }
 }
 
 export default function Downloads() {
@@ -237,6 +296,10 @@ export default function Downloads() {
     t.state === 'error'
   );
 
+  const importedTasks = tasks.filter(t =>
+    t.import_status === 'imported'
+  );
+
   // Watch for newly completed downloads and invalidate book queries
   useEffect(() => {
     if (!tasks || tasks.length === 0) return;
@@ -277,7 +340,7 @@ export default function Downloads() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-card border border-border rounded-lg p-4">
           <div className="flex items-center justify-between">
             <div>
@@ -294,6 +357,15 @@ export default function Downloads() {
               <p className="text-2xl font-bold text-foreground">{completedTasks.length}</p>
             </div>
             <CheckCircle className="h-8 w-8 text-green-500" />
+          </div>
+        </div>
+        <div className="bg-card border border-border rounded-lg p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-muted-foreground">Imported</p>
+              <p className="text-2xl font-bold text-foreground">{importedTasks.length}</p>
+            </div>
+            <FolderInput className="h-8 w-8 text-purple-500" />
           </div>
         </div>
         <div className="bg-card border border-border rounded-lg p-4">
@@ -351,10 +423,10 @@ export default function Downloads() {
           size="sm"
           onClick={() => clearAllMutation.mutate()}
           disabled={clearAllMutation.isPending || tasks.length === 0}
-          title={filterState ? `Clear all ${filterState} tasks` : 'Clear all eligible tasks'}
+          title={filterState ? `Clear all ${filterState} tasks` : 'Clear imported/failed tasks from history'}
         >
           <Trash2 className="h-4 w-4 mr-2" />
-          {filterState ? `Clear ${filterState}` : 'Clear All'}
+          {filterState ? `Clear ${filterState}` : 'Clear History'}
         </Button>
       </div>
 
@@ -365,9 +437,10 @@ export default function Downloads() {
             <TableRow>
               <TableHead className="text-foreground">TITLE</TableHead>
               <TableHead className="text-foreground">FORMAT</TableHead>
-              <TableHead className="text-foreground">PROTOCOL</TableHead>
-              <TableHead className="text-foreground">STATUS</TableHead>
+              <TableHead className="text-foreground">DOWNLOAD</TableHead>
+              <TableHead className="text-foreground">IMPORT</TableHead>
               <TableHead className="text-foreground">PROGRESS</TableHead>
+              <TableHead className="text-foreground">LOCATION</TableHead>
               <TableHead className="text-foreground">CREATED</TableHead>
               <TableHead className="text-foreground">ACTIONS</TableHead>
             </TableRow>
@@ -375,19 +448,19 @@ export default function Downloads() {
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
+                <TableCell colSpan={9} className="text-center text-muted-foreground">
                   Loading downloads...
                 </TableCell>
               </TableRow>
             ) : error ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-destructive">
+                <TableCell colSpan={9} className="text-center text-destructive">
                   Error loading downloads: {error instanceof Error ? error.message : 'Unknown error'}
                 </TableCell>
               </TableRow>
             ) : tasks.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
                   <Download className="h-12 w-12 mx-auto mb-2 text-muted-foreground/50" />
                   <p>No downloads found</p>
                   <p className="text-sm mt-1">Your download history will appear here</p>
@@ -411,23 +484,19 @@ export default function Downloads() {
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline" className="border-border text-foreground">
-                        {task.protocol.toUpperCase()}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
                       <Badge variant={getStateBadgeVariant(task.state)} className="gap-1">
                         {getStateIcon(task.state)}
                         {getDetailedStatus(task.state, task.client_state)}
                       </Badge>
-                      {task.message && task.state === 'error' && (
-                        <div className="text-xs text-muted-foreground mt-1" title={task.message}>
-                          {task.message.length > 40 ? `${task.message.substring(0, 40)}...` : task.message}
-                        </div>
-                      )}
                     </TableCell>
                     <TableCell>
-                      <div className="w-full max-w-[200px]">
+                      <Badge variant={getImportStatusBadgeVariant(task.import_status)} className="gap-1">
+                        {getImportStatusIcon(task.import_status)}
+                        {getImportStatusLabel(task.import_status)}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <div className="w-full max-w-[120px]">
                         <div className="flex items-center justify-between mb-1">
                           <span className="text-xs text-muted-foreground">
                             {task.progress.toFixed(0)}%
@@ -436,18 +505,38 @@ export default function Downloads() {
                         <Progress value={task.progress} className="h-2" />
                       </div>
                     </TableCell>
+                    <TableCell className="text-muted-foreground max-w-xs">
+                      {task.download_path ? (
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs truncate" title={task.download_path}>
+                            {task.download_path}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground/50">-</span>
+                      )}
+                    </TableCell>
                     <TableCell className="text-muted-foreground">
                       {formatTimestamp(task.created_at)}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
-                        {(task.state === 'complete' || task.state === 'seeding') && (
+                        {/* Show import button only when download is complete AND import hasn't succeeded yet */}
+                        {(task.state === 'complete' || task.state === 'seeding') &&
+                         task.import_status !== 'imported' &&
+                         task.import_status !== 'importing' && (
                           <Button
                             size="sm"
                             variant="outline"
                             onClick={() => importMutation.mutate(task.id)}
                             disabled={importMutation.isPending}
-                            title="Import to library"
+                            title={
+                              task.import_status === 'failed'
+                                ? 'Retry import'
+                                : task.import_status === 'pending'
+                                ? 'Import to library'
+                                : 'Import to library'
+                            }
                           >
                             <FolderInput className="h-4 w-4" />
                           </Button>
