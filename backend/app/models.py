@@ -16,6 +16,7 @@ class User(Base):
     # Permission fields
     can_request_ebook = Column(Boolean, default=True)
     can_request_audiobook = Column(Boolean, default=True)
+    can_download = Column(Boolean, default=True)
     auto_approve_ebooks = Column(Boolean, default=True)
     auto_approve_audiobooks = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
