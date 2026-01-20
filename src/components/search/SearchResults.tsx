@@ -44,7 +44,7 @@ export function SearchResults({ results, query, isLoading, isFetched }: SearchRe
   }
 
   return (
-    <div className="absolute top-full left-0 right-0 mt-2 rounded-lg bg-popover border border-border shadow-xl overflow-hidden max-h-96 overflow-y-auto">
+    <div className="absolute top-full left-0 right-0 mt-2 rounded-lg bg-popover border border-border shadow-xl overflow-hidden max-h-[70vh] overflow-y-auto z-50 overscroll-contain">
       {results.series.length > 0 && (
         <div className="border-b border-border/60">
           <div className="px-3 pt-3 pb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
