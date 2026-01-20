@@ -38,6 +38,11 @@ JOB_DEFINITIONS = {
         "description": "Fetch missing book metadata from Hardcover",
         "type": "PROCESS",
     },
+    "sync_download_states": {
+        "default_interval": 2 * 60,  # 2 minutes
+        "description": "Sync download states from download clients",
+        "type": "PROCESS",
+    },
 }
 
 
@@ -281,14 +286,16 @@ async def initialize_jobs():
         check_processing_requests,
         sync_from_booklore,
         sync_missing_metadata,
+        sync_download_states,
     )
-    
+
     # Map job names to their async functions
     job_functions = {
         "refresh_seed_data": refresh_seed_data,
         "check_processing_requests": check_processing_requests,
         "sync_from_booklore": sync_from_booklore,
         "sync_missing_metadata": sync_missing_metadata,
+        "sync_download_states": sync_download_states,
     }
     
     db = SessionLocal()

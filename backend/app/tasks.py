@@ -1069,9 +1069,233 @@ async def sync_missing_metadata():
                    updated=updated_count,
                    skipped_duplicates=skipped_duplicates,
                    failed=failed_count)
-        
+
     except Exception as e:
         logger.error("sync_missing_metadata_error", error=str(e))
         db.rollback()
     finally:
         db.close()
+
+
+async def sync_download_states():
+    """
+    Background task to sync download states from download clients.
+    Updates orphaned downloads that lost their handler threads after backend restart.
+    """
+    from app.models import DownloadTask, DownloadClient
+    from app.downloads.clients.qbittorrent import QBittorrentClient
+    from app.downloads.clients.nzbget import NZBGetClient
+
+    db: Session = SessionLocal()
+    try:
+        logger.info("sync_download_states_starting")
+
+        # Get all active download tasks that might need syncing
+        tasks = db.query(DownloadTask).filter(
+            DownloadTask.state.in_(['downloading', 'queued', 'checking', 'paused'])
+        ).all()
+
+        if not tasks:
+            logger.info("sync_download_states_no_tasks")
+            return
+
+        logger.info("sync_download_states_found_tasks", count=len(tasks))
+
+        # Group tasks by protocol
+        torrent_tasks = [t for t in tasks if t.protocol == 'torrent']
+        usenet_tasks = [t for t in tasks if t.protocol == 'usenet']
+
+        updated_count = 0
+
+        # Sync torrent downloads
+        if torrent_tasks:
+            updated_count += await _sync_torrent_downloads(db, torrent_tasks)
+
+        # Sync usenet downloads
+        if usenet_tasks:
+            updated_count += await _sync_usenet_downloads(db, usenet_tasks)
+
+        logger.info("sync_download_states_complete",
+                   total_tasks=len(tasks),
+                   updated=updated_count)
+
+    except Exception as e:
+        logger.error("sync_download_states_error", error=str(e))
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def _sync_torrent_downloads(db: Session, tasks: list) -> int:
+    """Sync torrent download states from qBittorrent"""
+    from app.models import DownloadClient
+    from app.downloads.clients.qbittorrent import QBittorrentClient
+
+    try:
+        # Get enabled qBittorrent client
+        client_config = db.query(DownloadClient).filter(
+            DownloadClient.type == 'qbittorrent',
+            DownloadClient.enabled == True
+        ).first()
+
+        if not client_config:
+            logger.warning("sync_torrents_no_client")
+            return 0
+
+        # Connect to client
+        client = QBittorrentClient(
+            host=client_config.host,
+            port=client_config.port,
+            username=client_config.username,
+            password=client_config.password,
+            use_ssl=client_config.use_ssl
+        )
+
+        if not client.test_connection():
+            logger.error("sync_torrents_connection_failed")
+            return 0
+
+        # Get all torrents from client
+        all_torrents = client.client.torrents_info()
+        torrent_map = {t.hash.lower(): t for t in all_torrents}
+
+        logger.info("sync_torrents_fetched", count=len(all_torrents))
+
+        updated = 0
+        for task in tasks:
+            if not task.info_hash:
+                continue
+
+            torrent_hash = task.info_hash.lower()
+            if torrent_hash in torrent_map:
+                torrent = torrent_map[torrent_hash]
+
+                # Map qBittorrent state to our state
+                old_state = task.state
+                old_client_state = task.client_state
+
+                qb_state = torrent.state.lower()
+                if 'error' in qb_state or 'missing' in qb_state:
+                    task.state = 'error'
+                    task.message = f"qBittorrent error: {torrent.state}"
+                elif qb_state in ['pauseddl', 'pausedup']:
+                    task.state = 'paused'
+                elif qb_state in ['queueddl', 'queuedup']:
+                    task.state = 'queued'
+                elif qb_state in ['checkingdl', 'checkingup', 'checkingresumedata']:
+                    task.state = 'checking'
+                elif qb_state in ['downloading', 'metadl', 'forceddl']:
+                    task.state = 'downloading'
+                elif qb_state in ['uploading', 'forcedup', 'stalledup']:
+                    task.state = 'seeding'
+                elif torrent.progress >= 1.0:
+                    task.state = 'complete'
+                    if not task.completed_at:
+                        task.completed_at = datetime.now(timezone.utc)
+
+                # Update client_state and progress
+                task.client_state = torrent.state
+                task.progress = torrent.progress * 100
+
+                if old_state != task.state or old_client_state != task.client_state:
+                    logger.info("sync_torrent_updated",
+                               task_id=task.id,
+                               old_state=old_state,
+                               new_state=task.state,
+                               old_client_state=old_client_state,
+                               new_client_state=task.client_state,
+                               progress=task.progress)
+                    updated += 1
+
+        db.commit()
+        return updated
+
+    except Exception as e:
+        logger.error("sync_torrents_error", error=str(e))
+        return 0
+
+
+async def _sync_usenet_downloads(db: Session, tasks: list) -> int:
+    """Sync usenet download states from NZBGet"""
+    from app.models import DownloadClient
+    from app.downloads.clients.nzbget import NZBGetClient
+
+    try:
+        # Get enabled NZBGet client
+        client_config = db.query(DownloadClient).filter(
+            DownloadClient.type == 'nzbget',
+            DownloadClient.enabled == True
+        ).first()
+
+        if not client_config:
+            logger.warning("sync_usenet_no_client")
+            return 0
+
+        # Connect to client
+        client = NZBGetClient(
+            host=client_config.host,
+            port=client_config.port,
+            username=client_config.username,
+            password=client_config.password,
+            use_ssl=client_config.use_ssl
+        )
+
+        if not client.test_connection():
+            logger.error("sync_usenet_connection_failed")
+            return 0
+
+        # Get all downloads from client
+        all_downloads = client.get_all_downloads()
+        download_map = {d['nzb_id']: d for d in all_downloads}
+
+        logger.info("sync_usenet_fetched", count=len(all_downloads))
+
+        updated = 0
+        for task in tasks:
+            if not task.info_hash:
+                continue
+
+            if task.info_hash in download_map:
+                download = download_map[task.info_hash]
+
+                # Map NZBGet state to our state
+                old_state = task.state
+                old_client_state = task.client_state
+
+                nzbget_state = download['state']
+                if nzbget_state in ['ERROR', 'FAILED']:
+                    task.state = 'error'
+                    task.message = download.get('message', 'NZBGet error')
+                elif nzbget_state == 'PAUSED':
+                    task.state = 'paused'
+                elif nzbget_state == 'QUEUED':
+                    task.state = 'queued'
+                elif nzbget_state == 'DOWNLOADING':
+                    task.state = 'downloading'
+                elif nzbget_state in ['POST_PROCESSING', 'EXTRACTING']:
+                    task.state = 'checking'
+                elif nzbget_state == 'SUCCESS':
+                    task.state = 'complete'
+                    if not task.completed_at:
+                        task.completed_at = datetime.now(timezone.utc)
+
+                # Update client_state and progress
+                task.client_state = nzbget_state
+                task.progress = download['progress']
+
+                if old_state != task.state or old_client_state != task.client_state:
+                    logger.info("sync_usenet_updated",
+                               task_id=task.id,
+                               old_state=old_state,
+                               new_state=task.state,
+                               old_client_state=old_client_state,
+                               new_client_state=task.client_state,
+                               progress=task.progress)
+                    updated += 1
+
+        db.commit()
+        return updated
+
+    except Exception as e:
+        logger.error("sync_usenet_error", error=str(e))
+        return 0
