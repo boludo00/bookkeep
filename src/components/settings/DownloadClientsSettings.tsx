@@ -165,6 +165,7 @@ export default function DownloadClientsSettings() {
         use_ssl: form.use_ssl,
         username: form.username || undefined,
         password: form.password || undefined,
+        api_key: form.password || undefined, // For Sabnzbd, password field contains API key
       });
 
       setTestResult(result);
@@ -212,6 +213,9 @@ export default function DownloadClientsSettings() {
     } else if (type === 'nzbget') {
       newPort = 6789;
       newProtocol = 'usenet';
+    } else if (type === 'sabnzbd') {
+      newPort = 8080;
+      newProtocol = 'usenet';
     }
 
     setForm({ ...form, type, port: newPort, protocol: newProtocol });
@@ -223,6 +227,8 @@ export default function DownloadClientsSettings() {
         return 'qBittorrent';
       case 'nzbget':
         return 'NZBGet';
+      case 'sabnzbd':
+        return 'Sabnzbd';
       default:
         return type;
     }
@@ -300,7 +306,7 @@ export default function DownloadClientsSettings() {
               {editingClient ? 'Edit Download Client' : 'Add Download Client'}
             </DialogTitle>
             <DialogDescription>
-              Configure your download client connection. For NZBGet, use the ControlPassword from nzbget.conf as the API key.
+              Configure your download client connection. For usenet clients, you'll need the API key from your client's settings.
             </DialogDescription>
           </DialogHeader>
 
@@ -325,6 +331,7 @@ export default function DownloadClientsSettings() {
                 <SelectContent>
                   <SelectItem value="qbittorrent">qBittorrent (Torrent)</SelectItem>
                   <SelectItem value="nzbget">NZBGet (Usenet)</SelectItem>
+                  <SelectItem value="sabnzbd">Sabnzbd (Usenet)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -379,7 +386,7 @@ export default function DownloadClientsSettings() {
 
             <div className="space-y-2">
               <Label htmlFor="client-password" className="text-foreground">
-                {form.type === 'nzbget' ? 'API Key' : 'Password'} {editingClient ? '(leave blank to keep current)' : ''}
+                {form.type === 'sabnzbd' ? 'API Key' : form.type === 'nzbget' ? 'API Key' : 'Password'} {editingClient ? '(leave blank to keep current)' : ''}
               </Label>
               <div className="relative">
                 <Input
@@ -387,7 +394,13 @@ export default function DownloadClientsSettings() {
                   type={showPassword ? "text" : "password"}
                   value={form.password}
                   onChange={(e) => setForm({ ...form, password: e.target.value })}
-                  placeholder={form.type === 'nzbget' ? 'ControlPassword from nzbget.conf' : ''}
+                  placeholder={
+                    form.type === 'nzbget'
+                      ? 'ControlPassword from nzbget.conf'
+                      : form.type === 'sabnzbd'
+                        ? 'API Key from Sabnzbd settings'
+                        : ''
+                  }
                   className="bg-secondary border-border pr-10"
                 />
                 <Button
@@ -407,6 +420,11 @@ export default function DownloadClientsSettings() {
               {form.type === 'nzbget' && (
                 <p className="text-xs text-muted-foreground">
                   Use the ControlPassword from your nzbget.conf file
+                </p>
+              )}
+              {form.type === 'sabnzbd' && (
+                <p className="text-xs text-muted-foreground">
+                  Find your API key in Sabnzbd settings under General → Security
                 </p>
               )}
             </div>

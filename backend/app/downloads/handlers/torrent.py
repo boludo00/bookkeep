@@ -202,6 +202,39 @@ class TorrentHandler(DownloadHandler):
                         ))
                     return None
 
+                # Check if this info_hash is already assigned to a different task
+                db = self.db_session or SessionLocal()
+                try:
+                    from ...models import DownloadTask as DownloadTaskModel
+                    existing_task = db.query(DownloadTaskModel).filter(
+                        DownloadTaskModel.client_download_id == info_hash,
+                        DownloadTaskModel.id != task.id
+                    ).first()
+
+                    if existing_task:
+                        logger.error(
+                            "torrent_duplicate_detected",
+                            task_id=task.id,
+                            info_hash=info_hash,
+                            existing_task_id=existing_task.id,
+                            existing_book_id=existing_task.book_id
+                        )
+                        if status_callback:
+                            status_callback(DownloadStatus(
+                                state=DownloadState.ERROR,
+                                progress=0.0,
+                                message=f"This release is already being downloaded for another book (task {existing_task.id})"
+                            ))
+                        # Remove the duplicate torrent we just added
+                        try:
+                            client.remove_torrent(info_hash, delete_files=False)
+                        except:
+                            pass
+                        return None
+                finally:
+                    if not self.db_session:
+                        db.close()
+
                 # Store client info in task
                 task.client_type = "qbittorrent"
                 task.client_download_id = info_hash

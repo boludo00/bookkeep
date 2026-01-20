@@ -12,7 +12,7 @@ import structlog
 from ..database import get_db
 from ..models import ProwlarrServer, DownloadClient
 from ..downloads.prowlarr import ProwlarrClient
-from ..downloads.clients import QBittorrentClient, NZBGetClient
+from ..downloads.clients import QBittorrentClient, NZBGetClient, SabnzbdClient
 
 router = APIRouter()
 logger = structlog.get_logger()
@@ -127,6 +127,7 @@ class DownloadClientTestRequest(BaseModel):
     use_ssl: bool
     username: Optional[str] = None
     password: Optional[str] = None
+    api_key: Optional[str] = None
 
 
 # Prowlarr endpoints
@@ -391,6 +392,27 @@ def test_download_client(request: DownloadClientTestRequest):
                     return {
                         "success": False,
                         "error": "Connection failed - could not reach NZBGet"
+                    }
+
+                # Get client info
+                info = client.get_client_info()
+
+                return {
+                    "success": True,
+                    "version": info.get("version")
+                }
+            elif request.type == "sabnzbd":
+                client = SabnzbdClient(
+                    host=request.host,
+                    port=request.port,
+                    api_key=request.api_key,
+                    use_ssl=request.use_ssl
+                )
+
+                if not client.test_connection():
+                    return {
+                        "success": False,
+                        "error": "Connection failed - could not reach Sabnzbd"
                     }
 
                 # Get client info

@@ -4,12 +4,12 @@ Usenet download handler.
 Handles usenet downloads using configured usenet clients (NZBGet, SABnzbd, etc.).
 """
 import time
-from typing import Optional, Callable
+from typing import Optional, Callable, Union
 from threading import Event
 import structlog
 
 from .. import DownloadHandler, DownloadStatus, DownloadState, register_handler
-from ..clients import NZBGetClient
+from ..clients import NZBGetClient, SabnzbdClient
 from ...models import DownloadTask, DownloadClient
 from sqlalchemy.orm import Session
 
@@ -19,7 +19,7 @@ logger = structlog.get_logger()
 @register_handler("usenet")
 class UsenetHandler(DownloadHandler):
     """
-    Usenet download handler using NZBGet.
+    Usenet download handler using NZBGet or Sabnzbd.
 
     Manages the download lifecycle:
     1. Add NZB to client
@@ -42,7 +42,7 @@ class UsenetHandler(DownloadHandler):
         self.db_session = db_session
         self._clients = {}  # Cache of initialized clients
 
-    def _get_client(self, task: DownloadTask) -> Optional[NZBGetClient]:
+    def _get_client(self, task: DownloadTask) -> Optional[Union[NZBGetClient, SabnzbdClient]]:
         """
         Get or create a usenet client for the task.
 
@@ -50,13 +50,28 @@ class UsenetHandler(DownloadHandler):
             task: Download task
 
         Returns:
-            NZBGetClient instance or None
+            NZBGetClient or SabnzbdClient instance or None
         """
         # If task has a specific client, use it
         if task.client_download_id and task.client_type:
             client_type = task.client_type
         else:
-            client_type = "nzbget"  # Default
+            # Try to find any enabled usenet client
+            if self.db_session:
+                try:
+                    client_config = self.db_session.query(DownloadClient).filter(
+                        DownloadClient.protocol == "usenet",
+                        DownloadClient.enabled == True
+                    ).order_by(DownloadClient.priority.desc()).first()
+
+                    if client_config:
+                        client_type = client_config.type
+                    else:
+                        client_type = "nzbget"  # Default fallback
+                except:
+                    client_type = "nzbget"  # Default fallback
+            else:
+                client_type = "nzbget"  # Default fallback
 
         # Check cache
         if client_type in self._clients:
@@ -81,16 +96,26 @@ class UsenetHandler(DownloadHandler):
                         except:
                             pass
 
-                    # Initialize client
-                    client = NZBGetClient(
-                        host=client_config.host,
-                        port=client_config.port,
-                        username=client_config.username,
-                        password=client_config.password,
-                        use_ssl=client_config.use_ssl,
-                        category=client_config.category,
-                        path_mappings=path_mappings,
-                    )
+                    # Initialize appropriate client based on type
+                    if client_type == "sabnzbd":
+                        client = SabnzbdClient(
+                            host=client_config.host,
+                            port=client_config.port,
+                            api_key=client_config.api_key,
+                            use_ssl=client_config.use_ssl,
+                            category=client_config.category,
+                            path_mappings=path_mappings,
+                        )
+                    else:  # nzbget
+                        client = NZBGetClient(
+                            host=client_config.host,
+                            port=client_config.port,
+                            username=client_config.username,
+                            password=client_config.password,
+                            use_ssl=client_config.use_ssl,
+                            category=client_config.category,
+                            path_mappings=path_mappings,
+                        )
 
                     # Cache it
                     self._clients[client_type] = client
@@ -196,11 +221,14 @@ class UsenetHandler(DownloadHandler):
                         ))
                     return None
 
-                # Store client info in task
-                task.client_type = "nzbget"
+                # Store client info in task - determine client type from client instance
+                if isinstance(client, SabnzbdClient):
+                    task.client_type = "sabnzbd"
+                else:
+                    task.client_type = "nzbget"
                 task.client_download_id = str(nzb_id)
 
-                logger.info("usenet_added", task_id=task.id, nzb_id=nzb_id)
+                logger.info("usenet_added", task_id=task.id, nzb_id=nzb_id, client_type=task.client_type)
 
             # Monitor download progress
             last_progress = -1

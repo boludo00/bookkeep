@@ -196,9 +196,6 @@ async def create_request(
                 error=str(e)
             )
             # Don't fail the request - just keep it as approved for manual fulfillment
-        except Exception as e:
-            logger.error("request_creation_error", request_id=db_request.id, error=str(e))
-            # Don't fail the request creation, just log the error
     
     # Convert book.genres from comma-separated string to list for response
     _normalize_book_genres(db_request.book)

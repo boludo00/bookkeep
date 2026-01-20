@@ -679,7 +679,7 @@ export const downloadSettingsApi = {
       method: 'DELETE',
     }),
 
-  testDownloadClient: (config: { type: string; protocol: string; host: string; port: number; use_ssl: boolean; username?: string; password?: string }) =>
+  testDownloadClient: (config: { type: string; protocol: string; host: string; port: number; use_ssl: boolean; username?: string; password?: string; api_key?: string }) =>
     apiRequest<DownloadClientTestResponse>('/api/download-settings/download-clients/test', {
       method: 'POST',
       body: JSON.stringify(config),

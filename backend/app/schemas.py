@@ -13,6 +13,7 @@ class UserCreate(UserBase):
     is_admin: Optional[bool] = False
     can_request_ebook: Optional[bool] = True
     can_request_audiobook: Optional[bool] = True
+    can_download: Optional[bool] = True
     auto_approve_ebooks: Optional[bool] = True
     auto_approve_audiobooks: Optional[bool] = True
 
@@ -22,11 +23,12 @@ class UserResponse(UserBase):
     is_admin: bool
     can_request_ebook: Optional[bool] = True
     can_request_audiobook: Optional[bool] = True
+    can_download: Optional[bool] = True
     auto_approve_ebooks: Optional[bool] = True
     auto_approve_audiobooks: Optional[bool] = True
     created_at: datetime
     updated_at: Optional[datetime] = None
-    
+
     @model_validator(mode='before')
     @classmethod
     def handle_none_values(cls, data):
@@ -36,6 +38,8 @@ class UserResponse(UserBase):
                 data['can_request_ebook'] = True
             if data.get('can_request_audiobook') is None:
                 data['can_request_audiobook'] = True
+            if data.get('can_download') is None:
+                data['can_download'] = True
             if data.get('auto_approve_ebooks') is None:
                 data['auto_approve_ebooks'] = True
             if data.get('auto_approve_audiobooks') is None:
@@ -53,6 +57,7 @@ class UserUpdate(BaseModel):
     is_admin: Optional[bool] = None
     can_request_ebook: Optional[bool] = None
     can_request_audiobook: Optional[bool] = None
+    can_download: Optional[bool] = None
     auto_approve_ebooks: Optional[bool] = None
     auto_approve_audiobooks: Optional[bool] = None
 

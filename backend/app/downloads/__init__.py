@@ -250,15 +250,16 @@ def register_handler(source_name: str):
     return decorator
 
 
-def get_source(name: str) -> ReleaseSource:
+def get_source(name: str, db_session=None) -> ReleaseSource:
     """
-    Get registered source by name.
+    Get registered source by name, loading configuration from database.
 
     Args:
         name: Source name (e.g., "prowlarr")
+        db_session: Optional database session (creates new if not provided)
 
     Returns:
-        Instantiated ReleaseSource
+        Instantiated ReleaseSource configured from database
 
     Raises:
         ValueError: If source not found
@@ -266,6 +267,34 @@ def get_source(name: str) -> ReleaseSource:
     if name not in _SOURCES:
         available = ", ".join(_SOURCES.keys())
         raise ValueError(f"Unknown source: {name}. Available: {available}")
+
+    # Load configuration from database for prowlarr
+    if name == "prowlarr":
+        from ..database import SessionLocal
+        from ..models import ProwlarrServer
+
+        db = db_session or SessionLocal()
+        try:
+            prowlarr_server = db.query(ProwlarrServer).filter(
+                ProwlarrServer.enabled == True
+            ).first()
+
+            if prowlarr_server:
+                # Build URL from database config
+                protocol = "https" if prowlarr_server.use_ssl else "http"
+                base_url = f"{protocol}://{prowlarr_server.host}:{prowlarr_server.port}"
+                if prowlarr_server.url_base:
+                    base_url = f"{base_url}/{prowlarr_server.url_base.strip('/')}"
+
+                return _SOURCES[name](
+                    base_url=base_url,
+                    api_key=prowlarr_server.api_key
+                )
+        finally:
+            if not db_session:
+                db.close()
+
+    # Default instantiation for other sources
     return _SOURCES[name]()
 
 

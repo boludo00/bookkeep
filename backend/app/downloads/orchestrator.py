@@ -70,8 +70,9 @@ class DownloadOrchestrator:
         Returns:
             List of Release objects sorted by quality
         """
+        db = self.db_session or SessionLocal()
         try:
-            source = get_source(source_name)
+            source = get_source(source_name, db_session=db)
 
             logger.info(
                 "orchestrator_search",
@@ -105,6 +106,9 @@ class DownloadOrchestrator:
                 error=str(e)
             )
             return []
+        finally:
+            if not self.db_session:
+                db.close()
 
     def create_download_task(
         self,
@@ -128,6 +132,14 @@ class DownloadOrchestrator:
         try:
             # Store release data as JSON
             import json
+            from datetime import datetime
+
+            # Custom JSON encoder to handle datetime objects
+            def json_serializer(obj):
+                if isinstance(obj, datetime):
+                    return obj.isoformat()
+                raise TypeError(f"Type {type(obj)} not serializable")
+
             release_data = {
                 "source": release.source,
                 "title": release.title,
@@ -142,6 +154,7 @@ class DownloadOrchestrator:
                 "format": release.format,
                 "language": release.language,
                 "quality_score": release.quality_score,
+                "publish_date": release.publish_date.isoformat() if release.publish_date else None,
                 "metadata": release.metadata,
             }
 
@@ -158,7 +171,7 @@ class DownloadOrchestrator:
                 protocol=release.protocol,
                 state="queued",
                 progress=0.0,
-                release_data_json=json.dumps(release_data),
+                release_data_json=json.dumps(release_data, default=json_serializer),
                 info_hash=info_hash,
             )
 
