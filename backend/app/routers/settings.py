@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
+from typing import Optional
 from app.database import get_db
 from app import schemas
 from app.models import AppSettings
@@ -61,6 +63,68 @@ async def set_hardcover_token(
     
     db.commit()
     db.refresh(setting)
-    
+
     return {"message": "Token updated successfully"}
+
+
+# Download Paths
+class DownloadPathsResponse(BaseModel):
+    ebook_download_path: Optional[str] = None
+    audiobook_download_path: Optional[str] = None
+
+class DownloadPathsUpdate(BaseModel):
+    ebook_download_path: Optional[str] = None
+    audiobook_download_path: Optional[str] = None
+
+def get_setting_value(db: Session, key: str) -> Optional[str]:
+    """Get a setting value from database or env var"""
+    # Check environment variable first
+    env_key = key.upper()
+    env_value = os.getenv(env_key)
+    if env_value:
+        return env_value
+
+    # Check database
+    setting = db.query(AppSettings).filter(AppSettings.key == key).first()
+    if setting and setting.value:
+        return setting.value
+
+    return None
+
+def set_setting_value(db: Session, key: str, value: Optional[str]):
+    """Set a setting value in database"""
+    setting = db.query(AppSettings).filter(AppSettings.key == key).first()
+    if setting:
+        setting.value = value or ""
+        setting.source = "ui"
+    else:
+        setting = AppSettings(
+            key=key,
+            value=value or "",
+            source="ui"
+        )
+        db.add(setting)
+    db.commit()
+
+@router.get("/download-paths", response_model=DownloadPathsResponse)
+async def get_download_paths(db: Session = Depends(get_db)):
+    """Get download paths configuration"""
+    return DownloadPathsResponse(
+        ebook_download_path=get_setting_value(db, "ebook_download_path"),
+        audiobook_download_path=get_setting_value(db, "audiobook_download_path")
+    )
+
+@router.put("/download-paths")
+async def update_download_paths(
+    update: DownloadPathsUpdate,
+    db: Session = Depends(get_db)
+):
+    """Update download paths configuration"""
+    if update.ebook_download_path is not None:
+        set_setting_value(db, "ebook_download_path", update.ebook_download_path)
+
+    if update.audiobook_download_path is not None:
+        set_setting_value(db, "audiobook_download_path", update.audiobook_download_path)
+
+    return {"message": "Download paths updated successfully"}
 
