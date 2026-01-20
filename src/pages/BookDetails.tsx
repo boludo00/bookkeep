@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Star, Calendar, BookOpen, Tag, Clock, Users, Headphones, Library, ExternalLink, Trash2, Search } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -20,8 +20,6 @@ export default function BookDetails() {
   const [requestOpen, setRequestOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchFormat, setSearchFormat] = useState<'ebook' | 'audiobook'>('ebook');
-  const [promptViewCounts, setPromptViewCounts] = useState<Record<string, number>>({});
-  const promptScrollLocks = useRef<Record<string, boolean>>({});
   const queryClient = useQueryClient();
   const { user } = useUser();
   const bypassCache =
@@ -213,6 +211,7 @@ export default function BookDetails() {
   const canRequestEbook = Boolean(user?.can_request_ebook) && !ebookAvailable;
   const canRequestAudiobook = Boolean(user?.can_request_audiobook) && !audiobookAvailable;
   const canRequestAnything = canRequestEbook || canRequestAudiobook;
+  const canDownload = Boolean(user?.can_download);
   const hasMissingFormat = !ebookAvailable || !audiobookAvailable;
   const preferredFormat =
     ebookAvailable && !audiobookAvailable
@@ -361,18 +360,20 @@ export default function BookDetails() {
                           ? 'Request Audiobook'
                           : 'Request Book'}
                     </Button>
-                    <Button
-                      size="lg"
-                      variant="outline"
-                      onClick={() => {
-                        setSearchFormat(preferredFormat || 'ebook');
-                        setSearchOpen(true);
-                      }}
-                      className="border-border hover:bg-accent"
-                    >
-                      <Search className="h-4 w-4 mr-2" />
-                      Search Book
-                    </Button>
+                    {canDownload && (
+                      <Button
+                        size="lg"
+                        variant="outline"
+                        onClick={() => {
+                          setSearchFormat(preferredFormat || 'ebook');
+                          setSearchOpen(true);
+                        }}
+                        className="border-border hover:bg-accent"
+                      >
+                        <Search className="h-4 w-4 mr-2" />
+                        Search Book
+                      </Button>
+                    )}
                   </>
                 )}
                 {hasAnyRequests && !ebookAvailable && !audiobookAvailable && (
@@ -446,11 +447,9 @@ export default function BookDetails() {
                 const promptBooks = (prompt?.prompt_books || [])
                   .map((entry: any) => entry?.book ? transformHardcoverBook(entry.book) : null)
                   .filter((book): book is ReturnType<typeof transformHardcoverBook> => Boolean(book));
-                const promptKey = String(prompt?.id ?? prompt?.slug ?? index);
                 const defaultVisible = Math.min(10, promptBooks.length);
-                const currentLimit = promptViewCounts[promptKey] ?? defaultVisible;
-                const visibleBooks = promptBooks.slice(0, currentLimit);
-                const hasMore = promptBooks.length > currentLimit;
+                const visibleBooks = promptBooks.slice(0, defaultVisible);
+                const promptKey = String(prompt?.id ?? prompt?.slug ?? index);
 
                 return (
                   <div
@@ -458,7 +457,7 @@ export default function BookDetails() {
                     className="rounded-2xl border border-border bg-card/80 p-5"
                   >
                     <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                      <div className="space-y-2">
+                      <div className="space-y-2 flex-1">
                         <p className="text-xs text-muted-foreground uppercase tracking-wide">
                           Hardcover Prompt
                         </p>
@@ -482,35 +481,18 @@ export default function BookDetails() {
                           )}
                         </div>
                       </div>
-                      <div className="text-xs text-muted-foreground">
-                        {hasMore ? 'Scroll to load more' : 'All books loaded'}
-                      </div>
+                      {prompt?.slug && promptBooks.length > defaultVisible && (
+                        <Link to={`/prompt/${prompt.slug}`}>
+                          <Button variant="outline" size="sm" className="whitespace-nowrap">
+                            {prompt.books_count && prompt.books_count > promptBooks.length
+                              ? `View More (${prompt.books_count} total)`
+                              : `View All ${promptBooks.length} Books`}
+                          </Button>
+                        </Link>
+                      )}
                     </div>
                     {visibleBooks.length > 0 && (
-                      <div
-                        className="mt-4 flex gap-4 overflow-x-auto pb-4 scrollbar-hide -mx-2 px-2"
-                        onScroll={(event) => {
-                          if (!hasMore) return;
-                          const container = event.currentTarget;
-                          const threshold = 120;
-                          const reachedEnd =
-                            container.scrollLeft + container.clientWidth >=
-                            container.scrollWidth - threshold;
-                          if (!reachedEnd) return;
-                          if (promptScrollLocks.current[promptKey]) return;
-                          promptScrollLocks.current[promptKey] = true;
-                          setPromptViewCounts((prev) => ({
-                            ...prev,
-                            [promptKey]: Math.min(
-                              (prev[promptKey] ?? defaultVisible) + 10,
-                              promptBooks.length
-                            ),
-                          }));
-                          window.setTimeout(() => {
-                            promptScrollLocks.current[promptKey] = false;
-                          }, 200);
-                        }}
-                      >
+                      <div className="mt-4 flex gap-4 overflow-x-auto pb-4 scrollbar-hide -mx-2 px-2">
                         {visibleBooks.map((promptBook) => (
                           <div
                             key={promptBook.id}

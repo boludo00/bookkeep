@@ -177,7 +177,12 @@ export const hardcoverApi = {
     apiRequest<{ prompt_summaries: any[] }>(
       `/api/hardcover/prompts/${bookId}?prompt_limit=${promptLimit}&books_limit=${booksLimit}`
     ),
-  
+
+  getPromptBySlug: (slug: string, limit: number = 1000, offset: number = 0, bypassCache: boolean = false) =>
+    apiRequest<{ prompt: any }>(
+      `/api/hardcover/prompt/${encodeURIComponent(slug)}?limit=${limit}&offset=${offset}&bypass_cache=${bypassCache}`
+    ),
+
   getByAuthor: (bookId: number, limit: number = 10) =>
     apiRequest<{ books: any[] }>(`/api/hardcover/by-author/${bookId}?limit=${limit}`),
   
@@ -339,6 +344,7 @@ export interface ApiUser {
   is_admin: boolean;
   can_request_ebook: boolean;
   can_request_audiobook: boolean;
+  can_download: boolean;
   auto_approve_ebooks: boolean;
   auto_approve_audiobooks: boolean;
   created_at: string;

@@ -18,6 +18,7 @@ import Series from "@/pages/Series";
 import SeriesDetail from "@/pages/SeriesDetail";
 import SearchResults from "@/pages/SearchResults";
 import Author from "@/pages/Author";
+import PromptDetail from "@/pages/PromptDetail";
 import Login from "@/pages/Login";
 import NotFound from "@/pages/NotFound";
 import AdminSetup from "@/pages/AdminSetup";
@@ -48,6 +49,7 @@ const App = () => (
                   <Route path="/downloads" element={<Downloads />} />
                   <Route path="/series" element={<Series />} />
                   <Route path="/series/:id" element={<SeriesDetail />} />
+                  <Route path="/prompt/:slug" element={<PromptDetail />} />
                   <Route path="/author" element={<Author />} />
                   <Route path="/profile" element={<Profile />} />
                   <Route path="/admin" element={<Admin />} />

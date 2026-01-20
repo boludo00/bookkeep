@@ -182,10 +182,20 @@ function getImportStatusLabel(status?: string): string {
   }
 }
 
+// Helper function to get initial completed tasks from localStorage
+const getInitialCompletedTasks = () => {
+  try {
+    const stored = localStorage.getItem('seen_completed_downloads');
+    return stored ? new Set<number>(JSON.parse(stored)) : new Set<number>();
+  } catch {
+    return new Set<number>();
+  }
+};
+
 export default function Downloads() {
   const queryClient = useQueryClient();
   const [filterState, setFilterState] = useState<string | undefined>(undefined);
-  const completedTasksRef = useRef<Set<number>>(new Set());
+  const completedTasksRef = useRef<Set<number>>(getInitialCompletedTasks());
 
   const { data: tasks = [], isLoading, error, refetch } = useQuery<DownloadTask[], Error>({
     queryKey: ['download-tasks', filterState],
@@ -312,6 +322,13 @@ export default function Downloads() {
     if (newlyCompleted.length > 0) {
       // Mark as seen
       newlyCompleted.forEach((t: DownloadTask) => completedTasksRef.current.add(t.id));
+
+      // Save to localStorage
+      try {
+        localStorage.setItem('seen_completed_downloads', JSON.stringify([...completedTasksRef.current]));
+      } catch (e) {
+        console.error('Failed to save seen downloads:', e);
+      }
 
       // Invalidate all book-related queries to refresh availability
       newlyCompleted.forEach((t: DownloadTask) => {
