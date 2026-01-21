@@ -141,7 +141,10 @@ class TestSearch:
     def test_search_http_error(self, mock_client):
         mock_response = Mock()
         mock_response.status_code = 500
-        mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError()
+        # HTTPError needs a response attribute for the error handler
+        http_error = requests.exceptions.HTTPError()
+        http_error.response = mock_response
+        mock_response.raise_for_status.side_effect = http_error
 
         with patch.object(mock_client.session, 'get', return_value=mock_response):
             results = mock_client.search("query")

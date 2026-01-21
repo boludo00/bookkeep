@@ -207,9 +207,12 @@ class TestPluginRegistry:
         # Verify it's registered
         assert "test_handler" in list_handlers()
 
-        # Retrieve it
-        handler = get_handler("test_handler")
-        assert isinstance(handler, TestHandler)
+        # Retrieve it - get_handler returns the class, not an instance
+        handler_class = get_handler("test_handler")
+        assert handler_class is TestHandler
+
+        # Instantiate and verify
+        handler = handler_class()
         assert handler.source_name == "test_handler"
 
     def test_get_unknown_source_raises_error(self):
@@ -327,7 +330,8 @@ class TestCallbackPattern:
                 progress_callback(100.0)
                 return "/tmp/test.epub"
 
-        handler = get_handler("test_progress")
+        handler_class = get_handler("test_progress")
+        handler = handler_class()
 
         # Mock callbacks
         progress_mock = Mock()
@@ -375,7 +379,8 @@ class TestCallbackPattern:
                 status_callback(DownloadState.COMPLETE, "Complete")
                 return "/tmp/test.epub"
 
-        handler = get_handler("test_status")
+        handler_class = get_handler("test_status")
+        handler = handler_class()
 
         progress_mock = Mock()
         status_mock = Mock()
@@ -421,7 +426,8 @@ class TestCancellation:
                     return None
                 return "/tmp/test.epub"
 
-        handler = get_handler("test_cancel")
+        handler_class = get_handler("test_cancel")
+        handler = handler_class()
 
         release = Release(
             source="test",

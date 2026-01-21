@@ -760,7 +760,9 @@ class TestGetClientInfo:
 
         info = mock_nzbget_client.get_client_info()
 
-        assert info == {}
+        # When RPC calls fail, version is None and config is empty
+        assert info["version"] is None
+        assert info["config"] == {}
 
 
 class TestGetQueueAndHistory:
