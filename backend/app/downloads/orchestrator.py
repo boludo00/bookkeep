@@ -404,6 +404,10 @@ class DownloadOrchestrator:
                     task_id=task.id,
                     dest_base=dest_base
                 )
+                # Mark import as failed
+                task.import_status = 'failed'
+                task.import_message = f'Destination path does not exist: {dest_base}'
+                db.commit()
                 return None
 
             # Determine source file/folder
@@ -414,6 +418,10 @@ class DownloadOrchestrator:
                     task_id=task.id,
                     source=source_path
                 )
+                # Mark import as failed
+                task.import_status = 'failed'
+                task.import_message = f'Source file not found: {source_path}'
+                db.commit()
                 return None
 
             # Determine destination name

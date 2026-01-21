@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Download, RefreshCw, Clock, CheckCircle, XCircle, Pause, PlayCircle, FolderInput, Trash2 } from 'lucide-react';
+import { Download, RefreshCw, Clock, CheckCircle, XCircle, Pause, PlayCircle, FolderInput, Trash2, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -11,6 +11,12 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { toast } from 'sonner';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { downloadsApi } from '@/lib/api';
@@ -507,10 +513,46 @@ export default function Downloads() {
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      <Badge variant={getImportStatusBadgeVariant(task.import_status)} className="gap-1">
-                        {getImportStatusIcon(task.import_status)}
-                        {getImportStatusLabel(task.import_status)}
-                      </Badge>
+                      {task.import_status === 'failed' && task.import_message ? (
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <div className="flex items-center gap-1 cursor-help">
+                                <Badge variant={getImportStatusBadgeVariant(task.import_status)} className="gap-1">
+                                  {getImportStatusIcon(task.import_status)}
+                                  {getImportStatusLabel(task.import_status)}
+                                </Badge>
+                                <AlertCircle className="h-3 w-3 text-destructive" />
+                              </div>
+                            </TooltipTrigger>
+                            <TooltipContent className="max-w-sm bg-popover border-border">
+                              <p className="text-sm font-semibold mb-1">Import Error:</p>
+                              <p className="text-xs text-muted-foreground">{task.import_message}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      ) : task.import_message && (task.import_status === 'imported' || task.import_status === 'importing') ? (
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <div>
+                                <Badge variant={getImportStatusBadgeVariant(task.import_status)} className="gap-1">
+                                  {getImportStatusIcon(task.import_status)}
+                                  {getImportStatusLabel(task.import_status)}
+                                </Badge>
+                              </div>
+                            </TooltipTrigger>
+                            <TooltipContent className="max-w-sm bg-popover border-border">
+                              <p className="text-xs">{task.import_message}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      ) : (
+                        <Badge variant={getImportStatusBadgeVariant(task.import_status)} className="gap-1">
+                          {getImportStatusIcon(task.import_status)}
+                          {getImportStatusLabel(task.import_status)}
+                        </Badge>
+                      )}
                     </TableCell>
                     <TableCell>
                       <div className="w-full max-w-[120px]">
@@ -538,22 +580,28 @@ export default function Downloads() {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
-                        {/* Show import button only when download is complete AND import hasn't succeeded yet */}
+                        {/* Show import button when:
+                            1. Download is complete/seeding
+                            2. Import hasn't succeeded
+                            3. Either not importing, OR importing but appears stuck (no recent update)
+                        */}
                         {(task.state === 'complete' || task.state === 'seeding') &&
-                         task.import_status !== 'imported' &&
-                         task.import_status !== 'importing' && (
+                         task.import_status !== 'imported' && (
                           <Button
                             size="sm"
                             variant="outline"
                             onClick={() => importMutation.mutate(task.id)}
                             disabled={importMutation.isPending}
                             title={
-                              task.import_status === 'failed'
+                              task.import_status === 'importing'
+                                ? 'Retry import (appears stuck)'
+                                : task.import_status === 'failed'
                                 ? 'Retry import'
                                 : task.import_status === 'pending'
                                 ? 'Import to library'
                                 : 'Import to library'
                             }
+                            className={task.import_status === 'importing' ? 'border-yellow-500/50 text-yellow-400 hover:bg-yellow-500/10' : ''}
                           >
                             <FolderInput className="h-4 w-4" />
                           </Button>
