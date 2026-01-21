@@ -10,6 +10,23 @@ Bookkeep is a self-hosted library companion for discovering books, exploring ser
 - Book and series request flows
 - Admin tooling for users, requests, and settings
 
+## Screenshots
+
+### Discover
+![Discover](docs/imgs/discover.png)
+
+### Book Details
+![Book Details](docs/imgs/book.png)
+
+### Series
+![Series](docs/imgs/series.png)
+
+### Search
+![Search](docs/imgs/search.png)
+
+### Requests
+![Requests](docs/imgs/requests.png)
+
 ## Tech Stack
 
 - React + Vite + TypeScript
