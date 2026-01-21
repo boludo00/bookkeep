@@ -2855,19 +2855,20 @@ async def get_similar_books(
 @router.get("/prompts/{book_id}", response_model=schemas.HardcoverBookPromptsResponse)
 async def get_book_prompts(
     book_id: int,
-    limit: int = Query(12, ge=1, le=40),
+    prompt_limit: int = Query(6, ge=1, le=20),
+    books_limit: int = Query(30, ge=1, le=200),
     bypass_cache: bool = False,
     db: Session = Depends(database.get_db)
 ):
     """Get Hardcover prompts that include this book - Cache → API"""
-    cache_key = cache.make_cache_key("book_prompts", book_id=book_id, limit=limit)
+    cache_key = cache.make_cache_key("book_prompts", book_id=book_id, prompt_limit=prompt_limit, books_limit=books_limit)
     if bypass_cache:
         await cache.delete_cached(cache_key)
-        logger.info("book_prompts_cache_bypass", book_id=book_id, limit=limit)
+        logger.info("book_prompts_cache_bypass", book_id=book_id, prompt_limit=prompt_limit, books_limit=books_limit)
     if not bypass_cache:
         cached_result = await cache.get_cached(cache_key)
         if cached_result is not None:
-            logger.info("book_prompts_cache_hit", book_id=book_id, limit=limit)
+            logger.info("book_prompts_cache_hit", book_id=book_id, prompt_limit=prompt_limit, books_limit=books_limit)
             return schemas.HardcoverBookPromptsResponse(**cached_result)
 
     try:
@@ -2930,10 +2931,10 @@ async def get_book_prompts(
         prompt_summaries = book_data.get("prompt_summaries", []) or []
 
         trimmed_summaries = []
-        for summary in prompt_summaries:
+        for summary in prompt_summaries[:prompt_limit]:
             prompt = summary.get("prompt") or {}
             prompt_books = prompt.get("prompt_books", []) or []
-            prompt_books = prompt_books[:limit]
+            prompt_books = prompt_books[:books_limit]
 
             parsed_prompt_books = []
             for entry in prompt_books:
@@ -2963,6 +2964,120 @@ async def get_book_prompts(
     except Exception as e:
         logger.warning("book_prompts_api_failed", book_id=book_id, error=str(e))
         return schemas.HardcoverBookPromptsResponse(prompt_summaries=[])
+
+@router.get("/prompt/{slug}")
+async def get_prompt_by_slug(
+    slug: str,
+    limit: int = Query(1000, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    bypass_cache: bool = False,
+    db: Session = Depends(database.get_db)
+):
+    """Get a specific prompt by slug with books (up to limit, starting from offset) - Cache → API"""
+    cache_key = cache.make_cache_key("prompt_detail", slug=slug, limit=limit, offset=offset)
+    if bypass_cache:
+        await cache.delete_cached(cache_key)
+        logger.info("prompt_detail_cache_bypass", slug=slug)
+    if not bypass_cache:
+        cached_result = await cache.get_cached(cache_key)
+        if cached_result is not None:
+            logger.info("prompt_detail_cache_hit", slug=slug)
+            return cached_result
+
+    try:
+        graphql_query = """
+        query PromptBySlug($slug: String!, $limit: Int!, $offset: Int!) {
+          prompts(where: {slug: {_eq: $slug}}, limit: 1) {
+            id
+            slug
+            question
+            description
+            answers_count
+            books_count
+            users_count
+            prompt_books(limit: $limit, offset: $offset) {
+              book {
+                id
+                title
+                slug
+                release_year
+                release_date
+                pages
+                description
+                cached_image
+                cached_contributors
+                rating
+                ratings_count
+                users_count
+                activities_count
+                default_ebook_edition_id
+                default_audio_edition_id
+                default_physical_edition_id
+                book_series {
+                  series {
+                    id
+                    name
+                  }
+                  position
+                }
+                contributions {
+                  author {
+                    id
+                    name
+                    slug
+                  }
+                }
+                taggings(limit: 5) {
+                  tag {
+                    tag
+                  }
+                }
+              }
+            }
+          }
+        }
+        """
+        result = await execute_graphql(graphql_query, {"slug": slug, "limit": limit, "offset": offset}, db=db)
+        prompts = result.get("prompts", [])
+
+        if not prompts or len(prompts) == 0:
+            raise HTTPException(status_code=404, detail="Prompt not found")
+
+        prompt_data = prompts[0]
+        prompt_books = prompt_data.get("prompt_books", []) or []
+
+        parsed_prompt_books = []
+        for entry in prompt_books:
+            book_data = entry.get("book")
+            if not book_data:
+                continue
+            parsed_prompt_books.append({"book": _parse_hardcover_book(book_data)})
+
+        response = {
+            "prompt": {
+                "id": prompt_data.get("id"),
+                "slug": prompt_data.get("slug"),
+                "question": prompt_data.get("question"),
+                "description": prompt_data.get("description"),
+                "answers_count": prompt_data.get("answers_count"),
+                "books_count": prompt_data.get("books_count"),  # Total books in prompt (from Hardcover)
+                "fetched_books_count": len(parsed_prompt_books),  # Actual books we fetched
+                "users_count": prompt_data.get("users_count"),
+                "prompt_books": parsed_prompt_books,
+            }
+        }
+
+        await cache.set_cached(
+            cache_key,
+            response,
+            ttl=cache.CACHE_TTL.get("prompt_detail", 86400)  # 24 hours
+        )
+        return response
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning("prompt_detail_api_failed", slug=slug, error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to fetch prompt: {str(e)}")
 
 @router.get("/by-author/{book_id}", response_model=schemas.HardcoverBooksResponse)
 async def get_books_by_author(book_id: int, limit: int = Query(10, ge=1, le=50), db: Session = Depends(database.get_db)):

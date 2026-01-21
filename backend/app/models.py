@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey, Float
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey, Float, BigInteger
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
@@ -16,6 +16,7 @@ class User(Base):
     # Permission fields
     can_request_ebook = Column(Boolean, default=True)
     can_request_audiobook = Column(Boolean, default=True)
+    can_download = Column(Boolean, default=True)
     auto_approve_ebooks = Column(Boolean, default=True)
     auto_approve_audiobooks = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -39,6 +40,8 @@ class Book(Base):
     page_count = Column(Integer, nullable=True)
     hardcover_id = Column(Integer, nullable=True, index=True, unique=True)
     hardcover_slug = Column(String, nullable=True, index=True)
+    booklore_id = Column(Integer, nullable=True, index=True, unique=True)
+    booklore_added_on = Column(DateTime(timezone=True), nullable=True)
     default_edition_id = Column(Integer, nullable=True)
     default_physical_edition_id = Column(Integer, nullable=True)
     default_ebook_edition_id = Column(Integer, nullable=True)
@@ -57,11 +60,14 @@ class Book(Base):
     ebook_available = Column(Boolean, default=False)  # Ebook is available in library
     audiobook_available = Column(Boolean, default=False)  # Audiobook is available in library
     last_refreshed = Column(DateTime(timezone=True), nullable=True)
+    # Track downloaded release hashes (JSON array of hashes) for duplicate detection
+    downloaded_release_hashes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
+
     requests = relationship("BookRequest", back_populates="book")
-    
+    download_tasks = relationship("DownloadTask", back_populates="book", cascade="all, delete-orphan")
+
     @property
     def is_available(self):
         """Book is available if either ebook or audiobook is available."""
@@ -92,9 +98,13 @@ class BookRequest(Base):
     admin_notes = Column(Text, nullable=True)
     readarr_book_id = Column(Integer, nullable=True, index=True)  # Readarr's internal book ID for status tracking
     edition_id = Column(Integer, nullable=True)  # Hardcover edition id selected for request
+    readarr_received = Column(Boolean, default=False, nullable=False)  # Whether Readarr acknowledged receiving the book
+    readarr_search_triggered = Column(Boolean, nullable=True)  # Whether search was triggered (True/False/None if unknown)
+    readarr_search_status_code = Column(Integer, nullable=True)  # HTTP status code from search command
+    readarr_message = Column(Text, nullable=True)  # Status/error message from Readarr
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
+
     book = relationship("Book", back_populates="requests")
     user = relationship("User", back_populates="requests")
 
@@ -161,3 +171,115 @@ class JobSchedule(Base):
     state_json = Column(Text, nullable=True)  # JSON for job-specific state (e.g., offset)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class DownloadClient(Base):
+    """Download client configuration (qBittorrent, NZBGet, SABnzbd, etc.)"""
+    __tablename__ = "download_clients"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False, index=True)
+    type = Column(String, nullable=False)  # "qbittorrent", "nzbget", "sabnzbd", "transmission"
+    protocol = Column(String, nullable=False)  # "torrent" or "usenet"
+
+    # Connection settings
+    host = Column(String, nullable=False)
+    port = Column(Integer, nullable=False)
+    use_ssl = Column(Boolean, default=False)
+    username = Column(String, nullable=True)
+    password = Column(String, nullable=True)  # TODO: Encrypt this
+
+    # Configuration
+    enabled = Column(Boolean, default=True)
+    priority = Column(Integer, default=0)  # Higher = preferred
+    category = Column(String, nullable=True)  # Legacy: default category
+    ebook_category = Column(String, nullable=True)  # Category for ebooks
+    audiobook_category = Column(String, nullable=True)  # Category for audiobooks
+
+    # Path mappings (JSON array of {remote, local} objects for Docker)
+    path_mappings_json = Column(Text, nullable=True)
+
+    # Metadata
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class ProwlarrServer(Base):
+    """Prowlarr server configuration for searching releases"""
+    __tablename__ = "prowlarr_servers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False, index=True)
+
+    # Connection settings
+    host = Column(String, nullable=False)
+    port = Column(Integer, nullable=False, default=9696)
+    use_ssl = Column(Boolean, default=False)
+    api_key = Column(String, nullable=False)
+    url_base = Column(String, nullable=True)
+
+    # Configuration
+    enabled = Column(Boolean, default=True)
+    is_default = Column(Boolean, default=False)
+
+    # Metadata
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class DownloadTask(Base):
+    """Download task tracking - replaces Readarr dependency"""
+    __tablename__ = "download_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    book_id = Column(Integer, ForeignKey("books.id"), nullable=False, index=True)
+    format = Column(String, nullable=False)  # "ebook" or "audiobook"
+
+    # Release information
+    source = Column(String, nullable=False)  # "prowlarr", "manual"
+    release_title = Column(String, nullable=True)
+    download_url = Column(String, nullable=True)
+    protocol = Column(String, nullable=True)  # "torrent" or "usenet"
+    indexer = Column(String, nullable=True)
+    indexer_id = Column(Integer, nullable=True)
+    size_bytes = Column(BigInteger, nullable=True)
+
+    # Download state
+    state = Column(String, default="queued", nullable=False, index=True)
+    progress = Column(Float, default=0.0)  # 0.0 to 100.0
+    download_speed = Column(Float, nullable=True)  # bytes/sec
+    upload_speed = Column(Float, nullable=True)  # bytes/sec (torrents)
+    eta_seconds = Column(Integer, nullable=True)
+    downloaded_bytes = Column(BigInteger, nullable=True)
+    total_bytes = Column(BigInteger, nullable=True)
+    message = Column(String, nullable=True)
+
+    # Paths
+    download_path = Column(String, nullable=True)  # Where file was downloaded
+    original_download_path = Column(String, nullable=True)  # For hardlinking (torrents)
+    final_path = Column(String, nullable=True)  # Final organized location
+
+    # Client tracking
+    client_type = Column(String, nullable=True)  # "qbittorrent", "nzbget", etc.
+    client_download_id = Column(String, nullable=True)  # ID in download client
+    client_state = Column(String(50), nullable=True)  # Raw state from client (e.g., "stalledDL", "uploading")
+
+    # Full release data (JSON blob)
+    release_data_json = Column(Text, nullable=True)
+
+    # Hash for tracking unique downloads (torrent info_hash, NZB hash, or download URL hash)
+    info_hash = Column(String(64), nullable=True, index=True)
+
+    # Import tracking
+    import_status = Column(String(20), server_default='pending', nullable=True)  # pending, importing, imported, failed, skipped
+    import_message = Column(String(500), nullable=True)  # Error message or status details
+    imported_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    book = relationship("Book", back_populates="download_tasks")

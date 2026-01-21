@@ -2,7 +2,8 @@
 Background tasks for refreshing seed data
 """
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from app.database import SessionLocal
@@ -13,6 +14,56 @@ from app.routers.settings import get_hardcover_token
 import structlog
 
 logger = structlog.get_logger()
+
+
+def create_book_from_booklore_data(
+    title: str,
+    author: Optional[str],
+    description: Optional[str],
+    cover_url: Optional[str],
+    isbn: Optional[str],
+    page_count: Optional[int],
+    published_date: Optional[str],
+    hardcover_id: int,
+    hardcover_slug: Optional[str],
+    booklore_id: str,
+    booklore_added_on: Optional[datetime],
+    series_name: Optional[str],
+    series_id: Optional[int],
+    series_number: Optional[float],
+    rating: Optional[float],
+    ratings_count: Optional[int],
+    users_count: Optional[int],
+    genres: Optional[str],
+    format_type: str,
+) -> Book:
+    """
+    Helper function to create a Book instance from Booklore data.
+    Eliminates duplicate book creation logic.
+    """
+    return Book(
+        title=title,
+        author=author,
+        description=description,
+        cover_url=cover_url,
+        isbn=isbn,
+        page_count=page_count,
+        published_date=published_date,
+        hardcover_id=hardcover_id,
+        hardcover_slug=hardcover_slug,
+        booklore_id=booklore_id,
+        booklore_added_on=booklore_added_on,
+        series=series_name,
+        series_id=series_id,
+        series_position=series_number,
+        rating=rating,
+        ratings_count=ratings_count,
+        users_count=users_count,
+        genres=genres,
+        ebook_available=(format_type == "ebook"),
+        audiobook_available=(format_type == "audiobook"),
+    )
+
 
 async def refresh_seed_data():
     """Background task to fetch new books from Hardcover API using progressive offset"""
@@ -172,7 +223,7 @@ async def refresh_seed_data():
                 activities_count=hc_book.activities_count,
                 release_year=hc_book.release_year,
                 is_seed_data=True,
-                last_refreshed=datetime.now(),
+                last_refreshed=datetime.now(timezone.utc),
             )
             db.add(db_book)
             existing_ids.add(hardcover_id)  # Track to avoid duplicates in same batch
@@ -212,9 +263,9 @@ def update_job_execution(job_name: str, max_retries: int = 3):
         try:
             schedule = db.query(JobSchedule).filter(JobSchedule.job_name == job_name).first()
             if schedule:
-                schedule.last_execution = datetime.now()
+                schedule.last_execution = datetime.now(timezone.utc)
                 interval = schedule.interval_seconds or 3600
-                schedule.next_execution = datetime.now() + timedelta(seconds=interval)
+                schedule.next_execution = datetime.now(timezone.utc) + timedelta(seconds=interval)
                 db.commit()
             return  # Success
         except Exception as e:
@@ -250,15 +301,15 @@ def get_seconds_until_next_execution(job_name: str) -> int:
     try:
         schedule = db.query(JobSchedule).filter(JobSchedule.job_name == job_name).first()
         if schedule and schedule.next_execution:
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
             if schedule.next_execution > now:
                 return int((schedule.next_execution - now).total_seconds())
         # If no next_execution or it's in the past, check last_execution + interval
         if schedule and schedule.last_execution:
             interval = schedule.interval_seconds or 3600
             next_run = schedule.last_execution + timedelta(seconds=interval)
-            if next_run > datetime.now():
-                return int((next_run - datetime.now()).total_seconds())
+            if next_run > datetime.now(timezone.utc):
+                return int((next_run - datetime.now(timezone.utc)).total_seconds())
         return 0  # Run immediately if never run before
     except Exception:
         return 0
@@ -298,6 +349,24 @@ async def check_processing_requests():
         logger.error("check_processing_requests_error", error=str(e))
     finally:
         db.close()
+
+
+def _parse_booklore_instant(value: Any) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value, tz=timezone.utc)
+    if isinstance(value, str):
+        text = value.strip()
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            return datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    return None
 
 
 async def sync_from_booklore():
@@ -358,6 +427,8 @@ async def sync_from_booklore():
         
         for bl_book in booklore_books:
             metadata = bl_book.get("metadata") or {}
+            booklore_id = bl_book.get("id")
+            booklore_added_on = _parse_booklore_instant(bl_book.get("addedOn"))
             hardcover_id_raw = metadata.get("hardcoverId")
             
             # Extract basic info from Booklore
@@ -365,6 +436,48 @@ async def sync_from_booklore():
             authors_list = metadata.get("authors") or []
             author = ", ".join(authors_list) if authors_list else "Unknown Author"
             
+            # Determine format from Booklore book type
+            book_type = bl_book.get("bookType", "").lower()
+            if "audio" in book_type:
+                format_type = "audiobook"
+            else:
+                format_type = "ebook"
+
+            # Fast-path: if we've already imported this Booklore book, skip Hardcover lookups
+            if booklore_id:
+                existing_by_booklore = db.query(Book).filter(Book.booklore_id == booklore_id).first()
+                if existing_by_booklore:
+                    if booklore_added_on:
+                        existing_by_booklore.booklore_added_on = booklore_added_on
+                    if format_type == "audiobook":
+                        existing_by_booklore.audiobook_available = True
+                    else:
+                        existing_by_booklore.ebook_available = True
+                    existing_by_booklore.last_refreshed = datetime.now(timezone.utc)
+                    db.add(existing_by_booklore)
+
+                    existing_request = db.query(BookRequest).filter(
+                        BookRequest.book_id == existing_by_booklore.id,
+                        BookRequest.format == format_type
+                    ).first()
+                    if existing_request and existing_request.status in ("processing", "approved", "requested"):
+                        existing_request.status = "available"
+                        existing_request.updated_at = datetime.now(timezone.utc)
+                        updated_count += 1
+                        logger.info("booklore_request_updated_to_available",
+                                  hardcover_id=existing_by_booklore.hardcover_id,
+                                  request_id=existing_request.id,
+                                  title=existing_by_booklore.title,
+                                  format=format_type)
+                    try:
+                        db.commit()
+                    except Exception as commit_error:
+                        logger.warning("booklore_book_commit_failed",
+                                     title=existing_by_booklore.title,
+                                     error=str(commit_error))
+                        db.rollback()
+                    continue
+
             # hardcoverId in Booklore can be either a numeric ID or a slug
             hardcover_id_int = None
             hardcover_slug = None
@@ -469,13 +582,6 @@ async def sync_from_booklore():
                 users_count = None
                 genres = None
             
-            # Determine format from Booklore book type
-            book_type = bl_book.get("bookType", "").lower()
-            if "audio" in book_type:
-                format_type = "audiobook"
-            else:
-                format_type = "ebook"
-            
             isbn = metadata.get("isbn13") or metadata.get("isbn10")
             
             # Check if we have this book locally - try multiple identifiers for upsert
@@ -525,6 +631,10 @@ async def sync_from_booklore():
                 db_book.published_date = published_date or db_book.published_date
                 db_book.hardcover_id = hardcover_id_int  # Update with proper ID
                 db_book.hardcover_slug = hardcover_slug or db_book.hardcover_slug
+                if booklore_id:
+                    db_book.booklore_id = booklore_id
+                if booklore_added_on:
+                    db_book.booklore_added_on = booklore_added_on
                 db_book.series = series_name or db_book.series
                 if hardcover_book_data and series_id:
                     db_book.series_id = series_id
@@ -542,7 +652,7 @@ async def sync_from_booklore():
                     db_book.audiobook_available = True
                 else:
                     db_book.ebook_available = True
-                db_book.last_refreshed = datetime.now()
+                db_book.last_refreshed = datetime.now(timezone.utc)
                 db.add(db_book)
                 
                 try:
@@ -571,6 +681,10 @@ async def sync_from_booklore():
                     existing_by_hc_id = db.query(Book).filter(Book.hardcover_id == hardcover_id_int).first()
                     if existing_by_hc_id:
                         db_book = existing_by_hc_id
+                        if booklore_id:
+                            db_book.booklore_id = booklore_id
+                        if booklore_added_on:
+                            db_book.booklore_added_on = booklore_added_on
                         books_updated += 1
                         logger.info("booklore_book_found_by_hardcover_id_final_check",
                                   hardcover_id=hardcover_id_int,
@@ -586,6 +700,10 @@ async def sync_from_booklore():
                                 db_book = existing_with_isbn
                                 db_book.hardcover_id = hardcover_id_int
                                 db_book.hardcover_slug = hardcover_slug
+                                if booklore_id:
+                                    db_book.booklore_id = booklore_id
+                                if booklore_added_on:
+                                    db_book.booklore_added_on = booklore_added_on
                                 db.add(db_book)
                                 db.flush()
                                 books_updated += 1
@@ -595,7 +713,7 @@ async def sync_from_booklore():
                                           title=title)
                             else:
                                 # Create new book with ISBN
-                                db_book = Book(
+                                db_book = create_book_from_booklore_data(
                                     title=title,
                                     author=author,
                                     description=description,
@@ -605,15 +723,16 @@ async def sync_from_booklore():
                                     published_date=published_date,
                                     hardcover_id=hardcover_id_int,
                                     hardcover_slug=hardcover_slug,
-                                    series=series_name,
+                                    booklore_id=booklore_id,
+                                    booklore_added_on=booklore_added_on,
+                                    series_name=series_name,
                                     series_id=series_id if hardcover_book_data else None,
-                                    series_position=series_number,
+                                    series_number=series_number,
                                     rating=rating,
                                     ratings_count=ratings_count,
                                     users_count=users_count,
                                     genres=genres,
-                                    ebook_available=(format_type == "ebook"),
-                                    audiobook_available=(format_type == "audiobook"),
+                                    format_type=format_type,
                                 )
                                 db.add(db_book)
                                 db.flush()
@@ -626,7 +745,7 @@ async def sync_from_booklore():
                                           has_hardcover_data=bool(hardcover_book_data))
                         else:
                             # Create new book without ISBN
-                            db_book = Book(
+                            db_book = create_book_from_booklore_data(
                                 title=title,
                                 author=author,
                                 description=description,
@@ -636,15 +755,16 @@ async def sync_from_booklore():
                                 published_date=published_date,
                                 hardcover_id=hardcover_id_int,
                                 hardcover_slug=hardcover_slug,
-                                series=series_name,
+                                booklore_id=booklore_id,
+                                booklore_added_on=booklore_added_on,
+                                series_name=series_name,
                                 series_id=series_id if hardcover_book_data else None,
-                                series_position=series_number,
+                                series_number=series_number,
                                 rating=rating,
                                 ratings_count=ratings_count,
                                 users_count=users_count,
                                 genres=genres,
-                                ebook_available=(format_type == "ebook"),
-                                audiobook_available=(format_type == "audiobook"),
+                                format_type=format_type,
                             )
                             db.add(db_book)
                             db.flush()
@@ -671,7 +791,7 @@ async def sync_from_booklore():
             
             if existing_request and existing_request.status in ("processing", "approved", "requested"):
                 existing_request.status = "available"
-                existing_request.updated_at = datetime.now()
+                existing_request.updated_at = datetime.now(timezone.utc)
                 updated_count += 1
                 logger.info("booklore_request_updated_to_available",
                           hardcover_id=hardcover_id_int,
@@ -913,7 +1033,7 @@ async def sync_missing_metadata():
                         if genres:
                             book.genres = genres
                     
-                    book.last_refreshed = datetime.now()
+                    book.last_refreshed = datetime.now(timezone.utc)
                     db.add(book)
                     
                     try:
@@ -949,10 +1069,233 @@ async def sync_missing_metadata():
                    updated=updated_count,
                    skipped_duplicates=skipped_duplicates,
                    failed=failed_count)
-        
+
     except Exception as e:
         logger.error("sync_missing_metadata_error", error=str(e))
         db.rollback()
     finally:
         db.close()
 
+
+async def sync_download_states():
+    """
+    Background task to sync download states from download clients.
+    Updates orphaned downloads that lost their handler threads after backend restart.
+    """
+    from app.models import DownloadTask, DownloadClient
+    from app.downloads.clients.qbittorrent import QBittorrentClient
+    from app.downloads.clients.nzbget import NZBGetClient
+
+    db: Session = SessionLocal()
+    try:
+        logger.info("sync_download_states_starting")
+
+        # Get all active download tasks that might need syncing
+        tasks = db.query(DownloadTask).filter(
+            DownloadTask.state.in_(['downloading', 'queued', 'checking', 'paused'])
+        ).all()
+
+        if not tasks:
+            logger.info("sync_download_states_no_tasks")
+            return
+
+        logger.info("sync_download_states_found_tasks", count=len(tasks))
+
+        # Group tasks by protocol
+        torrent_tasks = [t for t in tasks if t.protocol == 'torrent']
+        usenet_tasks = [t for t in tasks if t.protocol == 'usenet']
+
+        updated_count = 0
+
+        # Sync torrent downloads
+        if torrent_tasks:
+            updated_count += await _sync_torrent_downloads(db, torrent_tasks)
+
+        # Sync usenet downloads
+        if usenet_tasks:
+            updated_count += await _sync_usenet_downloads(db, usenet_tasks)
+
+        logger.info("sync_download_states_complete",
+                   total_tasks=len(tasks),
+                   updated=updated_count)
+
+    except Exception as e:
+        logger.error("sync_download_states_error", error=str(e))
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def _sync_torrent_downloads(db: Session, tasks: list) -> int:
+    """Sync torrent download states from qBittorrent"""
+    from app.models import DownloadClient
+    from app.downloads.clients.qbittorrent import QBittorrentClient
+
+    try:
+        # Get enabled qBittorrent client
+        client_config = db.query(DownloadClient).filter(
+            DownloadClient.type == 'qbittorrent',
+            DownloadClient.enabled == True
+        ).first()
+
+        if not client_config:
+            logger.warning("sync_torrents_no_client")
+            return 0
+
+        # Connect to client
+        client = QBittorrentClient(
+            host=client_config.host,
+            port=client_config.port,
+            username=client_config.username,
+            password=client_config.password,
+            use_ssl=client_config.use_ssl
+        )
+
+        if not client.test_connection():
+            logger.error("sync_torrents_connection_failed")
+            return 0
+
+        # Get all torrents from client
+        all_torrents = client.client.torrents_info()
+        torrent_map = {t.hash.lower(): t for t in all_torrents}
+
+        logger.info("sync_torrents_fetched", count=len(all_torrents))
+
+        updated = 0
+        for task in tasks:
+            if not task.info_hash:
+                continue
+
+            torrent_hash = task.info_hash.lower()
+            if torrent_hash in torrent_map:
+                torrent = torrent_map[torrent_hash]
+
+                # Map qBittorrent state to our state
+                old_state = task.state
+                old_client_state = task.client_state
+
+                qb_state = torrent.state.lower()
+                if 'error' in qb_state or 'missing' in qb_state:
+                    task.state = 'error'
+                    task.message = f"qBittorrent error: {torrent.state}"
+                elif qb_state in ['pauseddl', 'pausedup']:
+                    task.state = 'paused'
+                elif qb_state in ['queueddl', 'queuedup']:
+                    task.state = 'queued'
+                elif qb_state in ['checkingdl', 'checkingup', 'checkingresumedata']:
+                    task.state = 'checking'
+                elif qb_state in ['downloading', 'metadl', 'forceddl']:
+                    task.state = 'downloading'
+                elif qb_state in ['uploading', 'forcedup', 'stalledup']:
+                    task.state = 'seeding'
+                elif torrent.progress >= 1.0:
+                    task.state = 'complete'
+                    if not task.completed_at:
+                        task.completed_at = datetime.now(timezone.utc)
+
+                # Update client_state and progress
+                task.client_state = torrent.state
+                task.progress = torrent.progress * 100
+
+                if old_state != task.state or old_client_state != task.client_state:
+                    logger.info("sync_torrent_updated",
+                               task_id=task.id,
+                               old_state=old_state,
+                               new_state=task.state,
+                               old_client_state=old_client_state,
+                               new_client_state=task.client_state,
+                               progress=task.progress)
+                    updated += 1
+
+        db.commit()
+        return updated
+
+    except Exception as e:
+        logger.error("sync_torrents_error", error=str(e))
+        return 0
+
+
+async def _sync_usenet_downloads(db: Session, tasks: list) -> int:
+    """Sync usenet download states from NZBGet"""
+    from app.models import DownloadClient
+    from app.downloads.clients.nzbget import NZBGetClient
+
+    try:
+        # Get enabled NZBGet client
+        client_config = db.query(DownloadClient).filter(
+            DownloadClient.type == 'nzbget',
+            DownloadClient.enabled == True
+        ).first()
+
+        if not client_config:
+            logger.warning("sync_usenet_no_client")
+            return 0
+
+        # Connect to client
+        client = NZBGetClient(
+            host=client_config.host,
+            port=client_config.port,
+            username=client_config.username,
+            password=client_config.password,
+            use_ssl=client_config.use_ssl
+        )
+
+        if not client.test_connection():
+            logger.error("sync_usenet_connection_failed")
+            return 0
+
+        # Get all downloads from client
+        all_downloads = client.get_all_downloads()
+        download_map = {d['nzb_id']: d for d in all_downloads}
+
+        logger.info("sync_usenet_fetched", count=len(all_downloads))
+
+        updated = 0
+        for task in tasks:
+            if not task.info_hash:
+                continue
+
+            if task.info_hash in download_map:
+                download = download_map[task.info_hash]
+
+                # Map NZBGet state to our state
+                old_state = task.state
+                old_client_state = task.client_state
+
+                nzbget_state = download['state']
+                if nzbget_state in ['ERROR', 'FAILED']:
+                    task.state = 'error'
+                    task.message = download.get('message', 'NZBGet error')
+                elif nzbget_state == 'PAUSED':
+                    task.state = 'paused'
+                elif nzbget_state == 'QUEUED':
+                    task.state = 'queued'
+                elif nzbget_state == 'DOWNLOADING':
+                    task.state = 'downloading'
+                elif nzbget_state in ['POST_PROCESSING', 'EXTRACTING']:
+                    task.state = 'checking'
+                elif nzbget_state == 'SUCCESS':
+                    task.state = 'complete'
+                    if not task.completed_at:
+                        task.completed_at = datetime.now(timezone.utc)
+
+                # Update client_state and progress
+                task.client_state = nzbget_state
+                task.progress = download['progress']
+
+                if old_state != task.state or old_client_state != task.client_state:
+                    logger.info("sync_usenet_updated",
+                               task_id=task.id,
+                               old_state=old_state,
+                               new_state=task.state,
+                               old_client_state=old_client_state,
+                               new_client_state=task.client_state,
+                               progress=task.progress)
+                    updated += 1
+
+        db.commit()
+        return updated
+
+    except Exception as e:
+        logger.error("sync_usenet_error", error=str(e))
+        return 0

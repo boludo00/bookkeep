@@ -19,7 +19,7 @@ if default_db_path is None:
     project_root = Path(__file__).parent.parent.parent
     data_dir = project_root / "data"
     data_dir.mkdir(exist_ok=True)  # Create data directory if it doesn't exist
-    db_path = data_dir / "bookhound.db"
+    db_path = data_dir / "bookkeep.db"
     # Use absolute path for SQLite to avoid path issues
     DATABASE_URL = f"sqlite:///{db_path.absolute()}"
 else:

@@ -8,24 +8,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
-import { checkBackendAvailable, usersApi } from '@/lib/api';
+import { checkBackendAvailable, usersApi, authApi } from '@/lib/api';
 import { BookkeepLogo } from '@/components/brand/BookkeepLogo';
-
-// Simple login API call
-async function loginUser(username: string, password: string): Promise<{ user_id: number; is_admin: boolean }> {
-  const response = await fetch('/api/auth/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
-  });
-  
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Login failed' }));
-    throw new Error(error.detail || 'Invalid username or password');
-  }
-  
-  return response.json();
-}
 
 export default function Login() {
   const navigate = useNavigate();
@@ -35,7 +19,7 @@ export default function Login() {
   const [isLoading, setIsLoading] = useState(false);
   const [backendChecked, setBackendChecked] = useState(false);
   const [backendUp, setBackendUp] = useState<boolean | null>(null);
-  
+
   // Check backend availability on mount
   useEffect(() => {
     checkBackendAvailable().then((available) => {
@@ -59,14 +43,14 @@ export default function Login() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!username.trim() || !password) {
       toast.error('Please enter username and password');
       return;
     }
 
     setIsLoading(true);
-    
+
     try {
       if (!backendUp) {
         toast.error('Backend unavailable', {
@@ -74,19 +58,17 @@ export default function Login() {
         });
         return;
       }
-      
-      const result = await loginUser(username, password);
-      
-      // Store user ID in localStorage
-      localStorage.setItem('userId', String(result.user_id));
-      
+
+      // Use the new authApi.login which handles token storage
+      await authApi.login(username, password);
+
       toast.success('Welcome back!', {
         description: `Logged in as ${username}`,
       });
-      
+
       // Redirect to home
       navigate('/');
-      
+
       // Force a page reload to refresh user context
       window.location.reload();
     } catch (error: any) {
@@ -110,7 +92,7 @@ export default function Login() {
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       {/* Background gradient */}
       <div className="fixed inset-0 bg-gradient-to-br from-primary/10 via-background to-background" />
-      
+
       <Card className="relative w-full max-w-md bg-card/80 backdrop-blur-xl border-border shadow-2xl">
         <CardHeader className="text-center space-y-4">
           {/* Logo */}
@@ -126,7 +108,7 @@ export default function Login() {
             </CardDescription>
           </div>
         </CardHeader>
-        
+
         <CardContent className="space-y-4">
           {/* Backend unavailable info */}
           {!backendUp && (
@@ -152,7 +134,7 @@ export default function Login() {
                 disabled={!backendUp}
               />
             </div>
-            
+
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
               <div className="relative">
@@ -175,10 +157,10 @@ export default function Login() {
                 </button>
               </div>
             </div>
-            
-            <Button 
-              type="submit" 
-              className="w-full" 
+
+            <Button
+              type="submit"
+              className="w-full"
               size="lg"
               disabled={isLoading || !backendUp}
             >

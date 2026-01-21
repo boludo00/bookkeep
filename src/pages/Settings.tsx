@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Save, TestTube, CheckCircle, XCircle, Eye, EyeOff, Lock, Plus, Edit, Trash2, RefreshCw, Play, Clock } from 'lucide-react';
+import ProwlarrSettings from '@/components/settings/ProwlarrSettings';
+import DownloadClientsSettings from '@/components/settings/DownloadClientsSettings';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -36,7 +38,7 @@ import {
 } from '@/components/ui/table';
 import { toast } from 'sonner';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { settingsApi, readarrApi, jobsApi, bookloreApi, type BookloreServer } from '@/lib/api';
+import { settingsApi, readarrApi, jobsApi, bookloreApi, downloadSettingsApi, type BookloreServer, type ProwlarrServer, type DownloadClient } from '@/lib/api';
 
 interface ReadarrServer {
   id: number;
@@ -139,6 +141,8 @@ function Countdown({ nextExecution }: { nextExecution: string | null }) {
 export default function Settings() {
   const [showHardcoverToken, setShowHardcoverToken] = useState(false);
   const [hardcoverToken, setHardcoverToken] = useState('');
+  const [ebookDownloadPath, setEbookDownloadPath] = useState('');
+  const [audiobookDownloadPath, setAudiobookDownloadPath] = useState('');
   const [showServerModal, setShowServerModal] = useState(false);
   const [editingServer, setEditingServer] = useState<ReadarrServer | null>(null);
   const [showApiKey, setShowApiKey] = useState(false);
@@ -197,6 +201,12 @@ export default function Settings() {
     queryFn: () => settingsApi.getHardcoverToken(),
   });
 
+  // Fetch download paths
+  const { data: downloadPaths } = useQuery({
+    queryKey: ['download-paths'],
+    queryFn: () => settingsApi.getDownloadPaths(),
+  });
+
   // Fetch Readarr servers
   const { data: servers = [], refetch: refetchServers } = useQuery({
     queryKey: ['readarr-servers'],
@@ -242,6 +252,14 @@ export default function Settings() {
     }
   }, [tokenStatus]);
 
+  // Update download paths state when backend data loads
+  useEffect(() => {
+    if (downloadPaths) {
+      setEbookDownloadPath(downloadPaths.ebook_download_path || '');
+      setAudiobookDownloadPath(downloadPaths.audiobook_download_path || '');
+    }
+  }, [downloadPaths]);
+
   // Save Hardcover token mutation
   const saveHardcoverTokenMutation = useMutation({
     mutationFn: (token: string) => settingsApi.setHardcoverToken(token),
@@ -251,6 +269,23 @@ export default function Settings() {
     },
     onError: (error: Error) => {
       toast.error('Failed to save token', {
+        description: error.message,
+      });
+    },
+  });
+
+  // Save download paths mutation
+  const saveDownloadPathsMutation = useMutation({
+    mutationFn: () => settingsApi.updateDownloadPaths({
+      ebook_download_path: ebookDownloadPath || undefined,
+      audiobook_download_path: audiobookDownloadPath || undefined,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['download-paths'] });
+      toast.success('Download paths saved!');
+    },
+    onError: (error: Error) => {
+      toast.error('Failed to save download paths', {
         description: error.message,
       });
     },
@@ -700,6 +735,10 @@ export default function Settings() {
     }
   };
 
+  const handleSaveDownloadPaths = () => {
+    saveDownloadPathsMutation.mutate();
+  };
+
   const isHardcoverTokenFromEnv = tokenStatus?.hardcover_api_token_source === 'env';
 
   return (
@@ -784,6 +823,60 @@ export default function Settings() {
             </Button>
           </div>
         </CardContent>
+          </Card>
+
+          {/* Download Paths Settings */}
+          <Card className="bg-card border-border">
+            <CardHeader>
+              <CardTitle className="text-foreground">Download Paths</CardTitle>
+              <CardDescription>
+                Configure where eBooks and audiobooks should be downloaded
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="ebook-path" className="text-foreground">
+                  eBook Download Path
+                </Label>
+                <Input
+                  id="ebook-path"
+                  type="text"
+                  placeholder="/path/to/ebooks"
+                  value={ebookDownloadPath}
+                  onChange={(e) => setEbookDownloadPath(e.target.value)}
+                  className="bg-secondary border-border font-mono text-sm"
+                />
+                <p className="text-xs text-muted-foreground">
+                  The directory where eBooks will be downloaded
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="audiobook-path" className="text-foreground">
+                  Audiobook Download Path
+                </Label>
+                <Input
+                  id="audiobook-path"
+                  type="text"
+                  placeholder="/path/to/audiobooks"
+                  value={audiobookDownloadPath}
+                  onChange={(e) => setAudiobookDownloadPath(e.target.value)}
+                  className="bg-secondary border-border font-mono text-sm"
+                />
+                <p className="text-xs text-muted-foreground">
+                  The directory where audiobooks will be downloaded
+                </p>
+              </div>
+              <div className="flex justify-end">
+                <Button
+                  onClick={handleSaveDownloadPaths}
+                  disabled={saveDownloadPathsMutation.isPending}
+                  size="sm"
+                >
+                  <Save className="h-4 w-4 mr-2" />
+                  {saveDownloadPathsMutation.isPending ? 'Saving...' : 'Save Paths'}
+                </Button>
+              </div>
+            </CardContent>
           </Card>
         </TabsContent>
 
@@ -982,419 +1075,11 @@ export default function Settings() {
             </DialogContent>
           </Dialog>
 
-          {/* Readarr Settings */}
-          <Card className="bg-card border-border">
-            <CardHeader>
-              <CardTitle className="text-foreground">Readarr</CardTitle>
-              <CardDescription>
-                Configure your Readarr server(s) below. You can connect multiple Readarr servers (e.g., one for ebooks and one for audiobooks). Administrators are able to override the server used to process requests.
-              </CardDescription>
-            </CardHeader>
-        <CardContent className="space-y-4">
-          {/* Existing servers */}
-          {servers.map((server: ReadarrServer) => (
-            <div
-              key={server.id}
-              className="flex items-center justify-between p-4 border border-border rounded-lg bg-secondary/50"
-            >
-              <div className="flex-1">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="font-medium text-foreground">{server.name}</span>
-                  {server.is_default && (
-                    <Badge variant="secondary" className="text-xs">Default</Badge>
-                  )}
-                  {server.is_audiobook && (
-                    <Badge variant="secondary" className="text-xs">Audiobook</Badge>
-                  )}
-                  {server.use_ssl && (
-                    <Badge variant="secondary" className="text-xs">SSL</Badge>
-                  )}
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  {server.use_ssl ? 'https' : 'http'}://{server.hostname}:{server.port}
-                  {server.url_base && `/${server.url_base}`}
-                </p>
-                {server.is_audiobook ? (
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Audiobook Profile: {server.audiobook_quality_profile_id ? `ID ${server.audiobook_quality_profile_id}` : 'Not set'} • 
-                    Root Folder: {server.audiobook_root_folder || 'Not set'}
-                  </p>
-                ) : (
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Ebook Profile: {server.ebook_quality_profile_id ? `ID ${server.ebook_quality_profile_id}` : 'Not set'} • 
-                    Root Folder: {server.ebook_root_folder || 'Not set'}
-                  </p>
-                )}
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleEditServer(server)}
-                >
-                  <Edit className="h-4 w-4 mr-1" />
-                  Edit
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => deleteServerMutation.mutate(server.id)}
-                  disabled={deleteServerMutation.isPending}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          ))}
+          {/* Prowlarr Settings */}
+          <ProwlarrSettings />
 
-          {/* Add new server button */}
-          <button
-            onClick={handleAddServer}
-            className="w-full p-4 border-2 border-dashed border-border rounded-lg hover:border-primary/50 hover:bg-secondary/50 transition-colors flex items-center justify-center gap-2 text-muted-foreground hover:text-foreground"
-          >
-            <Plus className="h-5 w-5" />
-            Add New Readarr Server
-          </button>
-        </CardContent>
-      </Card>
-
-      {/* Add/Edit Server Modal */}
-      <Dialog open={showServerModal} onOpenChange={setShowServerModal}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
-              {editingServer ? 'Edit Readarr Server' : 'Add New Readarr Server'}
-            </DialogTitle>
-            <DialogDescription>
-              Configure your Readarr server connection and settings
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-6">
-            {/* Server Type */}
-            <div className="space-y-3">
-              <Label className="text-foreground">Server Type</Label>
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="is-default"
-                  checked={serverForm.is_default}
-                  onCheckedChange={(checked) =>
-                    setServerForm({ ...serverForm, is_default: checked === true })
-                  }
-                />
-                <Label htmlFor="is-default" className="font-normal cursor-pointer">
-                  Default Server
-                </Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="is-audiobook"
-                  checked={serverForm.is_audiobook}
-                  onCheckedChange={(checked) =>
-                    setServerForm({ ...serverForm, is_audiobook: checked === true })
-                  }
-                />
-                <Label htmlFor="is-audiobook" className="font-normal cursor-pointer">
-                  Audiobook Server
-                </Label>
-              </div>
-            </div>
-
-            {/* Server Details */}
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="server-name" className="text-foreground">
-                  Server Name *
-                </Label>
-                <Input
-                  id="server-name"
-                  value={serverForm.name}
-                  onChange={(e) => setServerForm({ ...serverForm, name: e.target.value })}
-                  placeholder="e.g., Ebooks"
-                  className="bg-secondary border-border"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="hostname" className="text-foreground">
-                  Hostname or IP Address *
-                </Label>
-                <Input
-                  id="hostname"
-                  value={serverForm.hostname}
-                  onChange={(e) => setServerForm({ ...serverForm, hostname: e.target.value })}
-                  placeholder="http://localhost"
-                  className="bg-secondary border-border"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="port" className="text-foreground">
-                  Port *
-                </Label>
-                <Input
-                  id="port"
-                  type="number"
-                  value={serverForm.port}
-                  onChange={(e) => setServerForm({ ...serverForm, port: parseInt(e.target.value) || 8787 })}
-                  className="bg-secondary border-border"
-                />
-              </div>
-
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="use-ssl"
-                  checked={serverForm.use_ssl}
-                  onCheckedChange={(checked) =>
-                    setServerForm({ ...serverForm, use_ssl: checked === true })
-                  }
-                />
-                <Label htmlFor="use-ssl" className="font-normal cursor-pointer">
-                  Use SSL
-                </Label>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="api-key" className="text-foreground">
-                  API Key *
-                </Label>
-                <div className="relative">
-                  <Input
-                    id="api-key"
-                    type={showApiKey ? "text" : "password"}
-                    value={serverForm.api_key}
-                    onChange={(e) => setServerForm({ ...serverForm, api_key: e.target.value })}
-                    className="bg-secondary border-border pr-20"
-                  />
-                  <div className="absolute right-0 top-0 h-full flex items-center gap-1 pr-2">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8"
-                      onClick={() => setShowApiKey(!showApiKey)}
-                    >
-                      {showApiKey ? (
-                        <EyeOff className="h-4 w-4" />
-                      ) : (
-                        <Eye className="h-4 w-4" />
-                      )}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8"
-                      onClick={handleTestConnection}
-                      disabled={testingConnection}
-                    >
-                      <RefreshCw className={`h-4 w-4 ${testingConnection ? 'animate-spin' : ''}`} />
-                    </Button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="url-base" className="text-foreground">
-                  URL Base
-                </Label>
-                <Input
-                  id="url-base"
-                  value={serverForm.url_base}
-                  onChange={(e) => setServerForm({ ...serverForm, url_base: e.target.value })}
-                  placeholder="Optional"
-                  className="bg-secondary border-border"
-                />
-              </div>
-
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleTestConnection}
-                disabled={testingConnection || !serverForm.hostname || !serverForm.api_key}
-                className="w-full"
-              >
-                <TestTube className="h-4 w-4 mr-2" />
-                {testingConnection ? 'Testing Connection...' : 'Test Connection'}
-              </Button>
-            </div>
-
-            {/* Ebook Settings */}
-            {!serverForm.is_audiobook && (
-              <div className="space-y-4 border-t border-border pt-4">
-                <h3 className="font-medium text-foreground">Ebook Settings</h3>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="ebook-quality-profile" className="text-foreground">
-                    Quality Profile *
-                  </Label>
-                  <Select
-                    value={serverForm.ebook_quality_profile_id?.toString() || ''}
-                    onValueChange={(value) => {
-                      const profileId = value ? parseInt(value, 10) : undefined;
-                      setServerForm({ ...serverForm, ebook_quality_profile_id: isNaN(profileId as number) ? undefined : profileId });
-                    }}
-                  >
-                    <SelectTrigger className="bg-secondary border-border">
-                      <SelectValue placeholder={testResults ? "Select quality profile" : "Test connection to load quality profiles"} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {testResults?.quality_profiles?.map((profile) => (
-                        <SelectItem key={profile.id} value={profile.id.toString()}>
-                          {profile.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="ebook-root-folder" className="text-foreground">
-                    Root Folder *
-                  </Label>
-                  <Select
-                    value={serverForm.ebook_root_folder || ''}
-                    onValueChange={(value) =>
-                      setServerForm({ ...serverForm, ebook_root_folder: value })
-                    }
-                  >
-                    <SelectTrigger className="bg-secondary border-border">
-                      <SelectValue placeholder={testResults ? "Select root folder" : "Test connection to load root folders"} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {testResults?.root_folders?.map((folder) => (
-                        <SelectItem key={folder.path} value={folder.path}>
-                          {folder.path}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="ebook-tags" className="text-foreground">
-                    Tags
-                  </Label>
-                  <Select
-                    value={serverForm.ebook_tags || ''}
-                    onValueChange={(value) =>
-                      setServerForm({ ...serverForm, ebook_tags: value })
-                    }
-                  >
-                    <SelectTrigger className="bg-secondary border-border">
-                      <SelectValue placeholder={testResults ? "Select tags" : "Test connection to load tags"} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {testResults?.tags?.map((tag) => (
-                        <SelectItem key={tag.id} value={tag.id.toString()}>
-                          {tag.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            )}
-
-            {/* Audiobook Settings */}
-            {serverForm.is_audiobook && (
-              <div className="space-y-4 border-t border-border pt-4">
-                <h3 className="font-medium text-foreground">Audiobook Settings</h3>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="audiobook-quality-profile" className="text-foreground">
-                    Audiobook Quality Profile
-                  </Label>
-                  <Select
-                    value={serverForm.audiobook_quality_profile_id?.toString() || ''}
-                    onValueChange={(value) => {
-                      const profileId = value ? parseInt(value, 10) : undefined;
-                      setServerForm({ ...serverForm, audiobook_quality_profile_id: isNaN(profileId as number) ? undefined : profileId });
-                    }}
-                  >
-                    <SelectTrigger className="bg-secondary border-border">
-                      <SelectValue placeholder={testResults ? "Select quality profile" : "Test connection to load quality profiles"} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {testResults?.quality_profiles?.map((profile) => (
-                        <SelectItem key={profile.id} value={profile.id.toString()}>
-                          {profile.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="audiobook-root-folder" className="text-foreground">
-                    Audiobook Root Folder
-                  </Label>
-                  <Select
-                    value={serverForm.audiobook_root_folder || ''}
-                    onValueChange={(value) =>
-                      setServerForm({ ...serverForm, audiobook_root_folder: value })
-                    }
-                  >
-                    <SelectTrigger className="bg-secondary border-border">
-                      <SelectValue placeholder={testResults ? "Select root folder" : "Test connection to load root folders"} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {testResults?.root_folders?.map((folder) => (
-                        <SelectItem key={folder.path} value={folder.path}>
-                          {folder.path}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="audiobook-tags" className="text-foreground">
-                    Audiobook Tags
-                  </Label>
-                  <Select
-                    value={serverForm.audiobook_tags || ''}
-                    onValueChange={(value) =>
-                      setServerForm({ ...serverForm, audiobook_tags: value })
-                    }
-                  >
-                    <SelectTrigger className="bg-secondary border-border">
-                      <SelectValue placeholder={testResults ? "Select tags" : "Test connection to load tags"} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {testResults?.tags?.map((tag) => (
-                        <SelectItem key={tag.id} value={tag.id.toString()}>
-                          {tag.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            )}
-
-            {/* Modal Actions */}
-            <div className="flex justify-end gap-2 pt-4 border-t border-border">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setShowServerModal(false);
-                  resetServerForm();
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleSaveServer}
-                disabled={saveServerMutation.isPending}
-              >
-                <Save className="h-4 w-4 mr-2" />
-                {saveServerMutation.isPending ? 'Saving...' : editingServer ? 'Update Server' : 'Add Server'}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+          {/* Download Clients Settings */}
+          <DownloadClientsSettings />
         </TabsContent>
 
         <TabsContent value="jobs" className="space-y-6 mt-6">

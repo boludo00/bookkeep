@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, BookOpen, Download, Loader2, Trash2, RefreshCw } from 'lucide-react';
+import { ArrowLeft, BookOpen, RefreshCw, Clock } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getSeriesBooks, normalizeSeriesBooks, rebuildSeries } from '@/lib/hardcover';
 import { requestsApi, readarrApi } from '@/lib/api';
@@ -11,12 +11,12 @@ import { Badge } from '@/components/ui/badge';
 import { BookCard } from '@/components/books/BookCard';
 import { toast } from 'sonner';
 import { useUser } from '@/contexts/UserContext';
-import type { Book } from '@/types/book';
+import { useAvailabilityPolling } from '@/hooks/useAvailabilityPolling';
+import type { Book, RequestStatusBatchResponse, AvailabilityBatchResponse, RequestStatus, AvailabilityStatus } from '@/types/book';
 
 export default function SeriesDetail() {
   const { id } = useParams();
   const queryClient = useQueryClient();
-  const [requestFormat, setRequestFormat] = useState<'ebook' | 'audiobook'>('ebook');
   const [seriesView, setSeriesView] = useState<'original' | 'expanded'>('original');
   const { isAdmin } = useUser();
   
@@ -60,27 +60,62 @@ export default function SeriesDetail() {
     return acc;
   }, {});
 
-  const { data: readarrAvailability } = useQuery({
+  const { data: readarrAvailability } = useQuery<AvailabilityBatchResponse>({
     queryKey: ['readarr', 'availability', 'series', id, hardcoverIds],
     queryFn: () => readarrApi.getAvailabilityBatch(hardcoverIds, isbnMap),
     enabled: hardcoverIds.length > 0,
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: requestStatuses } = useQuery({
+  const { data: requestStatuses, refetch: refetchRequestStatuses } = useQuery<RequestStatusBatchResponse>({
     queryKey: ['requests', 'by-hardcover', 'series', id, hardcoverIds],
     queryFn: () => requestsApi.getByHardcoverBatch(hardcoverIds),
     enabled: hardcoverIds.length > 0,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 30 * 1000, // Cache for 30 seconds - fresh enough for UI updates
+    refetchOnMount: true, // Refetch on mount but use cache if fresh
+    gcTime: 5 * 60 * 1000, // Keep in cache for 5 minutes
   });
 
-  const availabilityMap = new Map(
+  const availabilityMap = new Map<number, AvailabilityStatus>(
     readarrAvailability?.results.map((item) => [item.hardcover_id, item]) ?? []
   );
 
-  const requestStatusMap = new Map(
+  const requestStatusMap = new Map<number, RequestStatus>(
     requestStatuses?.results.map((item) => [item.hardcover_id, item]) ?? []
   );
+
+  // Find books with pending requests that need polling
+  const pendingRequests = useMemo(() => {
+    if (!requestStatuses?.results) return [];
+
+    return requestStatuses.results
+      .filter((status) => status.ebook === 'processing' || status.audiobook === 'processing')
+      .flatMap((status) => {
+        const requests: Array<{ hardcoverId: number; format: 'ebook' | 'audiobook'; readarrBookId: number | null }> = [];
+        if (status.ebook === 'processing') {
+          requests.push({
+            hardcoverId: status.hardcover_id,
+            format: 'ebook' as const,
+            readarrBookId: status.ebook_readarr_book_id || null,
+          });
+        }
+        if (status.audiobook === 'processing') {
+          requests.push({
+            hardcoverId: status.hardcover_id,
+            format: 'audiobook' as const,
+            readarrBookId: status.audiobook_readarr_book_id || null,
+          });
+        }
+        return requests;
+      });
+  }, [requestStatuses]);
+
+  // Poll for availability updates on books with pending requests
+  useAvailabilityPolling({
+    pendingRequests,
+    enabled: pendingRequests.length > 0,
+    seriesId: id,
+  });
 
   const booksWithAvailability = books.map((book) => {
     const hardcoverId = book.hardcoverId ?? Number(book.id);
@@ -95,46 +130,32 @@ export default function SeriesDetail() {
     };
   });
 
-  // Count available/requested books
+  // Count available books
   const availableCount = booksWithAvailability.filter(
     (b) => b.ebookAvailable || b.audiobookAvailable
   ).length;
-  const missingCount = booksWithAvailability.length - availableCount;
 
-  // Request series mutation
-  const requestSeriesMutation = useMutation({
-    mutationFn: (format: 'ebook' | 'audiobook') => 
-      requestsApi.requestSeries(Number(id), format, seriesView === 'original'),
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['requests'] });
-      queryClient.invalidateQueries({ queryKey: ['series', id] });
-      toast.success('Series request submitted!', {
-        description: `Requested ${data.requested_count} book(s). ${data.skipped_count} already available/requested.`,
-      });
-    },
-    onError: (error: Error) => {
-      toast.error('Failed to request series', {
-        description: error.message,
-      });
-    },
-  });
+  // Count books that are requested (not available, but have active requests)
+  const requestedCount = booksWithAvailability.filter((book) => {
+    const hardcoverId = book.hardcoverId ?? Number(book.id);
+    const isAvailable = book.ebookAvailable || book.audiobookAvailable;
 
-  // Clear series requests mutation
-  const clearSeriesMutation = useMutation({
-    mutationFn: () => requestsApi.clearSeries(Number(id)),
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['requests'] });
-      queryClient.invalidateQueries({ queryKey: ['series', id] });
-      toast.success('Series requests cleared!', {
-        description: `Cleared ${data.deleted_count} request(s) from ${data.affected_books} book(s).`,
-      });
-    },
-    onError: (error: Error) => {
-      toast.error('Failed to clear series requests', {
-        description: error.message,
-      });
-    },
-  });
+    // If book is available, it's not requested
+    if (isAvailable) return false;
+
+    // Check if book has any active requests (any format)
+    const requestStatus = Number.isFinite(hardcoverId)
+      ? requestStatusMap.get(Number(hardcoverId))
+      : undefined;
+
+    if (!requestStatus) return false; // No requests
+
+    // Count as requested if there's an active request for any format (not denied)
+    const ebookStatus = requestStatus.ebook;
+    const audiobookStatus = requestStatus.audiobook;
+
+    return (ebookStatus && ebookStatus !== 'denied') || (audiobookStatus && audiobookStatus !== 'denied');
+  }).length;
 
   // Rebuild series data (admin only)
   const rebuildSeriesMutation = useMutation({
@@ -151,14 +172,8 @@ export default function SeriesDetail() {
     },
   });
 
-  // Check if there are any requests to clear (books that are requested but not available)
-  const requestedCount = booksWithAvailability.filter(b => {
-    const isAvailable = b.ebookAvailable || b.audiobookAvailable;
-    return !isAvailable; // Could have requests if not available
-  }).length - missingCount; // Approximation - actual count would need API call
-  
-  // For now, show clear button if there are any non-available books
-  const hasRequests = books.length > availableCount;
+  // Show clear button if there are any requested books
+  const hasRequests = requestedCount > 0;
 
   if (isLoading) {
     return (
@@ -249,72 +264,27 @@ export default function SeriesDetail() {
                   {availableCount} Available
                 </Badge>
               )}
-              {missingCount > 0 && (
-                <Badge variant="secondary" className="bg-amber-500/20 text-amber-400 border-amber-500/30">
-                  {missingCount} Not Available
+              {requestedCount > 0 && (
+                <Badge variant="secondary" className="bg-blue-500/20 text-blue-400 border-blue-500/30">
+                  <Clock className="h-3 w-3 mr-1" />
+                  {requestedCount} Requested
                 </Badge>
               )}
             </div>
 
-            {/* Action Buttons */}
-            <div className="flex flex-wrap gap-3 pt-2">
-              {/* Request Series Button */}
-              {missingCount > 0 && (
-                <Button
-                  size="lg"
-                  onClick={() => requestSeriesMutation.mutate('ebook')}
-                  disabled={requestSeriesMutation.isPending || clearSeriesMutation.isPending}
-                  className="bg-primary hover:bg-primary/90 glow-primary"
-                >
-                  {requestSeriesMutation.isPending ? (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  ) : (
-                    <Download className="h-4 w-4 mr-2" />
-                  )}
-                  Request Series ({missingCount} book{missingCount !== 1 ? 's' : ''})
-                </Button>
-              )}
-              
-              {/* Clear Requests Button */}
-              {hasRequests && (
-                <Button
-                  size="lg"
-                  variant="outline"
-                  onClick={() => clearSeriesMutation.mutate()}
-                  disabled={clearSeriesMutation.isPending || requestSeriesMutation.isPending}
-                  className="border-destructive/50 text-destructive hover:bg-destructive/10 hover:border-destructive"
-                >
-                  {clearSeriesMutation.isPending ? (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  ) : (
-                    <Trash2 className="h-4 w-4 mr-2" />
-                  )}
-                  Clear Requests
-                </Button>
-              )}
-
-              {isAdmin && (
+            {/* Admin Actions */}
+            {isAdmin && (
+              <div className="flex flex-wrap gap-3 pt-2">
                 <Button
                   size="lg"
                   variant="outline"
                   onClick={() => rebuildSeriesMutation.mutate()}
-                  disabled={
-                    rebuildSeriesMutation.isPending ||
-                    requestSeriesMutation.isPending ||
-                    clearSeriesMutation.isPending
-                  }
+                  disabled={rebuildSeriesMutation.isPending}
                   className="border-amber-500/50 text-amber-400 hover:bg-amber-500/10 hover:border-amber-500/70"
                 >
                   <RefreshCw className={`h-4 w-4 mr-2 ${rebuildSeriesMutation.isPending ? 'animate-spin' : ''}`} />
                   {rebuildSeriesMutation.isPending ? 'Rebuilding...' : 'Rebuild Series'}
                 </Button>
-              )}
-            </div>
-
-            {missingCount === 0 && books.length > 0 && (
-              <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500/20 border border-emerald-500/30 w-fit">
-                <BookOpen className="h-5 w-5 text-emerald-400" />
-                <span className="font-medium text-emerald-400">Complete Series Available</span>
               </div>
             )}
           </div>
@@ -344,6 +314,7 @@ export default function SeriesDetail() {
                 )}
                 <BookCard
                   book={book}
+                  enableRequestStatus
                   requestStatus={requestStatusMap.get((book.hardcoverId ?? Number(book.id)) as number)}
                 />
               </div>
