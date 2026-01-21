@@ -198,7 +198,7 @@ export default function BookDetails() {
       : audiobookAvailable && !ebookAvailable
         ? 'ebook'
         : undefined;
-  const hasAnyRequests = Boolean(ebookRequestStatus || audiobookRequestStatus);
+  const hasAnyRequests = ebookRequested || audiobookRequested;
 
   return (
     <>
