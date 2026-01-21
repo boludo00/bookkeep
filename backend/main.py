@@ -108,7 +108,7 @@ app.include_router(download_settings.router, prefix="/api/download-settings", ta
 app.include_router(downloads.router, prefix="/api/downloads", tags=["downloads"])
 app.include_router(auth.router)  # No prefix, it's already in the router
 
-enable_debug_routes = os.getenv("BOOKHOUND_DEBUG_ROUTES", "").lower() in {"1", "true", "yes"}
+enable_debug_routes = os.getenv("bookkeep_DEBUG_ROUTES", "").lower() in {"1", "true", "yes"}
 if enable_debug_routes:
     # Log jobs router registration for debugging
     logger.info("jobs_router_registered", prefix="/api/jobs", routes_count=len(jobs.router.routes))

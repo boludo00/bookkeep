@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { usersApi, ApiUser } from '@/lib/api';
+import { usersApi, authApi, isAuthenticated, clearTokens, ApiUser } from '@/lib/api';
 
 interface UserContextType {
   user: ApiUser | null;
@@ -16,13 +16,12 @@ const UserContext = createContext<UserContextType | undefined>(undefined);
 export function UserProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const [isLoggedIn, setIsLoggedIn] = useState(() => {
-    return !!localStorage.getItem('userId');
+    return isAuthenticated();
   });
 
   const { data: user, isLoading, refetch } = useQuery({
     queryKey: ['currentUser'],
     queryFn: async () => {
-      // The API layer handles mock data automatically
       return usersApi.getMe();
     },
     enabled: isLoggedIn,
@@ -31,7 +30,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
   });
 
   const logout = () => {
-    localStorage.removeItem('userId');
+    authApi.logout();
     setIsLoggedIn(false);
     queryClient.clear();
     window.location.href = '/login';
@@ -41,15 +40,20 @@ export function UserProvider({ children }: { children: ReactNode }) {
     refetch();
   };
 
-  // Listen for localStorage changes (e.g., login in another tab)
+  // Listen for storage changes (e.g., login in another tab)
   useEffect(() => {
     const handleStorageChange = () => {
-      const hasUserId = !!localStorage.getItem('userId');
-      setIsLoggedIn(hasUserId);
+      const authenticated = isAuthenticated();
+      setIsLoggedIn(authenticated);
     };
 
     window.addEventListener('storage', handleStorageChange);
     return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
+
+  // Update isLoggedIn when authentication state changes
+  useEffect(() => {
+    setIsLoggedIn(isAuthenticated());
   }, []);
 
   const value: UserContextType = {

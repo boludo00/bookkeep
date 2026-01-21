@@ -27,7 +27,7 @@ pip install -r requirements.txt
 
 3. Set up environment variables:
 ```bash
-export DATABASE_URL=postgresql://bookhound:bookhound_password@localhost:5432/bookhound_db
+export DATABASE_URL=postgresql://bookkeep:bookkeep_password@localhost:5432/bookkeep_db
 ```
 
 4. Run the server:

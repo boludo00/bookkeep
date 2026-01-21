@@ -185,7 +185,7 @@ class TorrentHandler(DownloadHandler):
 
                 # Add torrent with unique tag to identify it later
                 # Use task_id as unique identifier to avoid race conditions
-                unique_tag = f"bookhound-{task.id}"
+                unique_tag = f"bookkeep-{task.id}"
 
                 if task.download_url.startswith("magnet:"):
                     info_hash = client.add_torrent(magnet=task.download_url, category=category, tags=[unique_tag])

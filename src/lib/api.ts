@@ -3,6 +3,76 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '' 
 
 let backendAvailable: boolean | null = null;
 
+// Token storage keys
+const ACCESS_TOKEN_KEY = 'accessToken';
+const REFRESH_TOKEN_KEY = 'refreshToken';
+
+// Token management functions
+export function getAccessToken(): string | null {
+  return localStorage.getItem(ACCESS_TOKEN_KEY);
+}
+
+export function getRefreshToken(): string | null {
+  return localStorage.getItem(REFRESH_TOKEN_KEY);
+}
+
+export function setTokens(accessToken: string, refreshToken: string): void {
+  localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
+  localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+}
+
+export function clearTokens(): void {
+  localStorage.removeItem(ACCESS_TOKEN_KEY);
+  localStorage.removeItem(REFRESH_TOKEN_KEY);
+  // Also clear legacy userId if present
+  localStorage.removeItem('userId');
+}
+
+export function isAuthenticated(): boolean {
+  return !!getAccessToken();
+}
+
+// Token refresh logic
+let refreshPromise: Promise<boolean> | null = null;
+
+async function refreshAccessToken(): Promise<boolean> {
+  // If already refreshing, wait for that promise
+  if (refreshPromise) {
+    return refreshPromise;
+  }
+
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) {
+    return false;
+  }
+
+  refreshPromise = (async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+
+      if (!response.ok) {
+        clearTokens();
+        return false;
+      }
+
+      const data = await response.json();
+      localStorage.setItem(ACCESS_TOKEN_KEY, data.access_token);
+      return true;
+    } catch {
+      clearTokens();
+      return false;
+    } finally {
+      refreshPromise = null;
+    }
+  })();
+
+  return refreshPromise;
+}
+
 export async function checkBackendAvailable(): Promise<boolean> {
   if (backendAvailable !== null) return backendAvailable;
 
@@ -41,22 +111,38 @@ export function isBackendAvailable(): boolean | null {
 
 async function apiRequest<T>(
   endpoint: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
+  retry = true
 ): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
-  
-  // Get user ID from localStorage or default to 1 (for development)
-  // In production, this should come from auth context/session
-  const userId = localStorage.getItem('userId') || '1';
-  
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...options.headers as Record<string, string>,
+  };
+
+  // Add Authorization header if we have a token
+  const accessToken = getAccessToken();
+  if (accessToken) {
+    headers['Authorization'] = `Bearer ${accessToken}`;
+  }
+
   const response = await fetch(url, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      'X-User-Id': userId,
-      ...options.headers,
-    },
+    headers,
   });
+
+  // Handle 401 - try to refresh token
+  if (response.status === 401 && retry) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) {
+      // Retry the request with the new token
+      return apiRequest<T>(endpoint, options, false);
+    }
+    // Refresh failed - redirect to login
+    window.location.href = '/login';
+    throw new Error('Session expired');
+  }
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ message: 'Request failed' }));
@@ -104,7 +190,7 @@ export const hardcoverApi = {
       `/api/hardcover/search-grouped?${params.toString()}`
     );
   },
-  
+
   getDetails: (bookId: number, options?: { bypassCache?: boolean }) => {
     const params = new URLSearchParams();
     if (options?.bypassCache) {
@@ -139,13 +225,13 @@ export const hardcoverApi = {
       }>;
     }>(`/api/hardcover/editions/${bookId}${query}`);
   },
-  
+
   getTrending: (limit: number = 20) =>
     apiRequest<{ books: any[] }>(`/api/hardcover/trending?limit=${limit}`),
-  
+
   getPopular: (limit: number = 20) =>
     apiRequest<{ books: any[] }>(`/api/hardcover/popular?limit=${limit}`),
-  
+
   getNewReleases: (limit: number = 20, minRatings: number = 5) => {
     const params = new URLSearchParams({
       limit: String(limit),
@@ -153,7 +239,7 @@ export const hardcoverApi = {
     });
     return apiRequest<{ books: any[] }>(`/api/hardcover/new-releases?${params}`);
   },
-  
+
   getSeries: (seriesId: number, options?: { bypassCache?: boolean }) => {
     const params = new URLSearchParams();
     if (options?.bypassCache) {
@@ -169,10 +255,10 @@ export const hardcoverApi = {
     apiRequest<{ series_by_pk: any }>(`/api/hardcover/series/${seriesId}/rebuild`, {
       method: 'POST',
     }),
-  
+
   getSimilar: (bookId: number, limit: number = 10) =>
     apiRequest<{ books: any[] }>(`/api/hardcover/similar/${bookId}?limit=${limit}`),
-  
+
   getBookPrompts: (bookId: number, promptLimit: number = 6, booksLimit: number = 30) =>
     apiRequest<{ prompt_summaries: any[] }>(
       `/api/hardcover/prompts/${bookId}?prompt_limit=${promptLimit}&books_limit=${booksLimit}`
@@ -185,7 +271,7 @@ export const hardcoverApi = {
 
   getByAuthor: (bookId: number, limit: number = 10) =>
     apiRequest<{ books: any[] }>(`/api/hardcover/by-author/${bookId}?limit=${limit}`),
-  
+
   getPopularSeries: (limit: number = 20, minTotalRatings: number = 500, offset: number = 0) => {
     const params = new URLSearchParams({
       limit: String(limit),
@@ -223,27 +309,27 @@ export const hardcoverApi = {
 export const booksApi = {
   getAll: (skip: number = 0, limit: number = 100) =>
     apiRequest<Array<any>>(`/api/books/?skip=${skip}&limit=${limit}`),
-  
+
   getById: (id: number) =>
     apiRequest<any>(`/api/books/${id}`),
-  
+
   create: (book: any) =>
     apiRequest<any>('/api/books/', {
       method: 'POST',
       body: JSON.stringify(book),
     }),
-  
+
   update: (id: number, book: any) =>
     apiRequest<any>(`/api/books/${id}`, {
       method: 'PUT',
       body: JSON.stringify(book),
     }),
-  
+
   delete: (id: number) =>
     apiRequest<void>(`/api/books/${id}`, {
       method: 'DELETE',
     }),
-  
+
 };
 
 // Requests API endpoints
@@ -257,30 +343,30 @@ export const requestsApi = {
     if (userId) params.append('user_id', String(userId));
     return apiRequest<Array<any>>(`/api/requests/?${params}`);
   },
-  
+
   getById: (id: number) =>
     apiRequest<any>(`/api/requests/${id}`),
-  
+
   create: (request: { book_id: number; format: string; notes?: string; edition_id?: number }) =>
     apiRequest<any>('/api/requests/', {
       method: 'POST',
       body: JSON.stringify(request),
     }),
-  
+
   update: (id: number, update: { status?: string; admin_notes?: string }) =>
     apiRequest<any>(`/api/requests/${id}`, {
       method: 'PUT',
       body: JSON.stringify(update),
     }),
-  
+
   delete: (id: number) =>
     apiRequest<void>(`/api/requests/${id}`, {
       method: 'DELETE',
     }),
-  
+
   getByBook: (bookId: number) =>
     apiRequest<{ ebook: string | null; audiobook: string | null }>(`/api/requests/by-book/${bookId}`),
-  
+
   getByHardcoverId: (hardcoverId: number) =>
     apiRequest<{
       ebook: string | null;
@@ -289,7 +375,7 @@ export const requestsApi = {
       audiobook_readarr_book_id: number | null;
       book_id: number | null;
     }>(`/api/requests/by-hardcover/${hardcoverId}`),
-  
+
   clearByHardcoverId: (hardcoverId: number, format?: 'ebook' | 'audiobook') =>
     apiRequest<{ message: string; deleted_count: number; formats: string[] }>(
       `/api/requests/by-hardcover/${hardcoverId}${format ? `?format=${format}` : ''}`,
@@ -304,7 +390,7 @@ export const requestsApi = {
         body: JSON.stringify({ hardcover_ids: hardcoverIds }),
       }
     ),
-  
+
   requestSeries: (
     seriesId: number,
     format: 'ebook' | 'audiobook' = 'ebook',
@@ -321,7 +407,7 @@ export const requestsApi = {
     }>(`/api/requests/series/${seriesId}?format=${format}${originalOnly ? '&original_only=true' : ''}`, {
       method: 'POST',
     }),
-  
+
   clearSeries: (seriesId: number, format?: 'ebook' | 'audiobook') =>
     apiRequest<{
       message: string;
@@ -351,38 +437,79 @@ export interface ApiUser {
   updated_at?: string;
 }
 
+// Auth response types
+export interface LoginResponse {
+  access_token: string;
+  refresh_token: string;
+  token_type: string;
+  expires_in: number;
+}
+
+// Auth API endpoints
+export const authApi = {
+  login: async (username: string, password: string): Promise<LoginResponse> => {
+    const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Login failed' }));
+      throw new Error(error.detail || 'Invalid username or password');
+    }
+
+    const data = await response.json();
+    setTokens(data.access_token, data.refresh_token);
+    return data;
+  },
+
+  refresh: () =>
+    apiRequest<{ access_token: string; token_type: string; expires_in: number }>(
+      '/api/auth/refresh',
+      {
+        method: 'POST',
+        body: JSON.stringify({ refresh_token: getRefreshToken() }),
+      }
+    ),
+
+  logout: () => {
+    clearTokens();
+  },
+};
+
 // Users API endpoints
 export const usersApi = {
   checkAdminExists: () =>
     apiRequest<{ admin_exists: boolean }>('/api/users/check/admin-exists'),
-  
+
   getMe: () =>
     apiRequest<ApiUser>('/api/users/me'),
-  
+
   changePassword: (currentPassword: string, newPassword: string) =>
     apiRequest<{ message: string }>('/api/users/me/password', {
       method: 'PUT',
       body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
     }),
-  
+
   create: (user: { email: string; username: string; password: string; full_name?: string; is_admin?: boolean }) =>
     apiRequest<ApiUser>('/api/users/', {
       method: 'POST',
       body: JSON.stringify(user),
     }),
-  
+
   getAll: (skip: number = 0, limit: number = 100) =>
     apiRequest<Array<ApiUser>>(`/api/users/?skip=${skip}&limit=${limit}`),
-  
+
   getById: (id: number) =>
     apiRequest<ApiUser>(`/api/users/${id}`),
-  
+
   update: (id: number, update: any) =>
     apiRequest<ApiUser>(`/api/users/${id}`, {
       method: 'PUT',
       body: JSON.stringify(update),
     }),
-  
+
   delete: (id: number) =>
     apiRequest<void>(`/api/users/${id}`, {
       method: 'DELETE',
@@ -414,27 +541,27 @@ export const settingsApi = {
 export const readarrApi = {
   getAll: () =>
     apiRequest<Array<any>>('/api/readarr/'),
-  
+
   getById: (id: number) =>
     apiRequest<any>(`/api/readarr/${id}`),
-  
+
   create: (server: any) =>
     apiRequest<any>('/api/readarr/', {
       method: 'POST',
       body: JSON.stringify(server),
     }),
-  
+
   update: (id: number, server: any) =>
     apiRequest<any>(`/api/readarr/${id}`, {
       method: 'PUT',
       body: JSON.stringify(server),
     }),
-  
+
   delete: (id: number) =>
     apiRequest<void>(`/api/readarr/${id}`, {
       method: 'DELETE',
     }),
-  
+
   testConnection: (config: { hostname: string; port: number; use_ssl: boolean; api_key: string; url_base?: string }) =>
     apiRequest<{
       success: boolean;
@@ -446,10 +573,10 @@ export const readarrApi = {
       method: 'POST',
       body: JSON.stringify(config),
     }),
-  
+
   getConfiguredFormats: () =>
     apiRequest<{ ebook: boolean; audiobook: boolean }>('/api/readarr/configured-formats'),
-  
+
   getAvailability: (hardcoverId: number) =>
     apiRequest<{ ebook: boolean; audiobook: boolean }>(`/api/readarr/availability/${hardcoverId}`),
 
@@ -551,36 +678,36 @@ export interface BookloreTestResponse {
 export const bookloreApi = {
   getAll: () =>
     apiRequest<Array<BookloreServer>>('/api/booklore/'),
-  
+
   getById: (id: number) =>
     apiRequest<BookloreServer>(`/api/booklore/${id}`),
-  
+
   create: (server: { name: string; url: string; username: string; password: string; is_default?: boolean }) =>
     apiRequest<BookloreServer>('/api/booklore/', {
       method: 'POST',
       body: JSON.stringify(server),
     }),
-  
+
   update: (id: number, server: { name?: string; url?: string; username?: string; password?: string; is_default?: boolean }) =>
     apiRequest<BookloreServer>(`/api/booklore/${id}`, {
       method: 'PUT',
       body: JSON.stringify(server),
     }),
-  
+
   delete: (id: number) =>
     apiRequest<void>(`/api/booklore/${id}`, {
       method: 'DELETE',
     }),
-  
+
   testConnection: (config: { url: string; username: string; password: string }) =>
     apiRequest<BookloreTestResponse>('/api/booklore/test', {
       method: 'POST',
       body: JSON.stringify(config),
     }),
-  
+
   getBooks: (serverId: number) =>
     apiRequest<Array<any>>(`/api/booklore/${serverId}/books`),
-  
+
   checkBook: (serverId: number, hardcoverId: number) =>
     apiRequest<{ available: boolean; book?: any }>(`/api/booklore/${serverId}/check/${hardcoverId}`),
 };

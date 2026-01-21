@@ -8,6 +8,7 @@ pydantic-settings==2.6.0
 python-dotenv==1.0.1
 python-multipart==0.0.12
 passlib[bcrypt]==1.7.4
+python-jose[cryptography]==3.3.0
 httpx==0.27.2
 structlog==24.1.0
 aiocache==0.12.2

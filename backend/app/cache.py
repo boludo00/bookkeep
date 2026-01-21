@@ -64,18 +64,18 @@ async def init_cache():
                 port=redis_config["port"],
                 db=redis_config["db"],
                 serializer=JsonSerializer(),
-                namespace="bookhound",
+                namespace="bookkeep",
             )
             # Test connection
             await cache_instance.get("test")
             logger.info("cache_backend", backend="redis", url=REDIS_URL)
         except Exception as e:
             logger.warning("redis_init_failed", error=str(e), fallback="memory")
-            cache_instance = Cache(Cache.MEMORY, serializer=JsonSerializer(), namespace="bookhound")
+            cache_instance = Cache(Cache.MEMORY, serializer=JsonSerializer(), namespace="bookkeep")
             logger.info("cache_backend", backend="memory")
     else:
         # No Redis URL, use in-memory cache
-        cache_instance = Cache(Cache.MEMORY, serializer=JsonSerializer(), namespace="bookhound")
+        cache_instance = Cache(Cache.MEMORY, serializer=JsonSerializer(), namespace="bookkeep")
         logger.info("cache_backend", backend="memory")
 
 async def close_cache():
