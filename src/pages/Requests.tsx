@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { requestsApi, readarrApi } from '@/lib/api';
+import { requestsApi } from '@/lib/api';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
 import type { BookRequest } from '@/types/book';
@@ -17,6 +17,7 @@ const statusConfig = {
   available: { label: 'Available', className: 'bg-green-500/20 text-green-400 border-green-500/50', icon: CheckCircle },
   denied: { label: 'Denied', className: 'bg-red-500/20 text-red-400 border-red-500/50', icon: XCircle },
   not_found: { label: 'Not Found', className: 'bg-red-500/20 text-red-400 border-red-500/50', icon: XCircle },
+  pending: { label: 'Pending', className: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/50', icon: Clock },
 };
 
 function formatRelativeTime(dateString: string | null | undefined): string {
@@ -50,13 +51,11 @@ function getUserInitials(name: string): string {
   return name.substring(0, 2).toUpperCase();
 }
 
-function RequestRow({ request, hasReadarrServer }: { request: BookRequest; hasReadarrServer: boolean }) {
+function RequestRow({ request }: { request: BookRequest }) {
   const queryClient = useQueryClient();
   const status = statusConfig[request.status] ?? statusConfig.requested;
   const StatusIcon = status.icon;
   const isProcessing = request.status === 'processing';
-  const isApproved = request.status === 'approved';
-  const canProcess = isApproved && hasReadarrServer;
 
   const deleteMutation = useMutation({
     mutationFn: () => requestsApi.delete(Number(request.id)),
@@ -66,19 +65,6 @@ function RequestRow({ request, hasReadarrServer }: { request: BookRequest; hasRe
     },
     onError: (error: Error) => {
       toast.error('Failed to delete request', {
-        description: error.message,
-      });
-    },
-  });
-
-  const processMutation = useMutation({
-    mutationFn: () => requestsApi.update(Number(request.id), { status: 'processing' }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['requests'] });
-      toast.success('Request is being processed');
-    },
-    onError: (error: Error) => {
-      toast.error('Failed to process request', {
         description: error.message,
       });
     },
@@ -211,15 +197,6 @@ function RequestRow({ request, hasReadarrServer }: { request: BookRequest; hasRe
             </div>
           )}
 
-          {/* Warning for approved without Readarr */}
-          {isApproved && !hasReadarrServer && (
-            <div className="p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
-              <p className="text-xs text-yellow-400">
-                No Readarr server configured. Configure one in Settings to process this request.
-              </p>
-            </div>
-          )}
-
           {/* Action Buttons */}
           <div className="flex flex-col gap-2 pt-2">
             {isProcessing && (
@@ -234,7 +211,7 @@ function RequestRow({ request, hasReadarrServer }: { request: BookRequest; hasRe
                 Mark as Available
               </Button>
             )}
-            
+
             <Button
               variant="destructive"
               size="sm"
@@ -245,19 +222,6 @@ function RequestRow({ request, hasReadarrServer }: { request: BookRequest; hasRe
               <Trash2 className="h-4 w-4 mr-2" />
               Delete Request
             </Button>
-            
-            {canProcess && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => processMutation.mutate()}
-                disabled={processMutation.isPending}
-                className="w-full border-red-500/50 text-red-400 hover:bg-red-500/10"
-              >
-                <Trash2 className="h-4 w-4 mr-2" />
-                Remove from Readarr
-              </Button>
-            )}
           </div>
         </div>
       </div>
@@ -279,14 +243,13 @@ export default function Requests() {
   const { data: requests = [], isLoading } = useQuery({
     queryKey: ['requests', statusFilter],
     queryFn: () => requestsApi.getAll(0, 100, statusFilter),
+    refetchInterval: (query) => {
+      // Auto-refresh every 10 seconds if there are any processing requests
+      const data = query.state.data;
+      const hasProcessing = Array.isArray(data) && data.some((req: any) => req.status === 'processing');
+      return hasProcessing ? 10000 : false;
+    },
   });
-
-  const { data: readarrServers = [] } = useQuery({
-    queryKey: ['readarr-servers'],
-    queryFn: () => readarrApi.getAll(),
-  });
-
-  const hasReadarrServer = readarrServers.length > 0;
 
   // Transform API requests to match frontend BookRequest type
   // Filter out requests without books to prevent UI issues
@@ -368,7 +331,7 @@ export default function Requests() {
           ) : (
             <div className="space-y-4">
               {filteredRequests.map((request) => (
-                <RequestRow key={request.id} request={request} hasReadarrServer={hasReadarrServer} />
+                <RequestRow key={request.id} request={request} />
               ))}
             </div>
           )}

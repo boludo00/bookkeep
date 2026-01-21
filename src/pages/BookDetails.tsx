@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Star, Calendar, BookOpen, Tag, Clock, Users, Headphones, Library, ExternalLink, Trash2, Search } from 'lucide-react';
+import { ArrowLeft, Star, Calendar, BookOpen, Tag, Clock, Users, Headphones, Library, ExternalLink, Trash2, Search, X } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -9,7 +9,7 @@ import { RequestDialog } from '@/components/books/RequestDialog';
 import { SearchReleaseDialog } from '@/components/books/SearchReleaseDialog';
 import { BookCard } from '@/components/books/BookCard';
 import { useBookDetails, useBookPrompts } from '@/hooks/useHardcoverBooks';
-import { requestsApi, readarrApi, booksApi } from '@/lib/api';
+import { requestsApi, booksApi } from '@/lib/api';
 import { transformHardcoverBook } from '@/lib/hardcover';
 import { toast } from 'sonner';
 import { useUser } from '@/contexts/UserContext';
@@ -53,47 +53,10 @@ export default function BookDetails() {
     gcTime: 5 * 60 * 1000, // Keep in cache for 5 minutes
   });
 
-  const hasAnyRequestsForReadarr = Boolean(requestStatus?.ebook || requestStatus?.audiobook);
-  const { data: readarrManageLink } = useQuery({
-    queryKey: ['readarr', 'manage-link', hardcoverId],
-    queryFn: () => readarrApi.getManageLink(hardcoverId as number),
-    enabled: hasHardcoverId && hasAnyRequestsForReadarr,
-  });
-
-  const { data: readarrAvailability } = useQuery({
-    queryKey: ['readarr', 'availability', hardcoverId],
-    queryFn: () => readarrApi.getAvailability(hardcoverId as number),
-    enabled: hasHardcoverId,
-    refetchInterval: hasHardcoverId ? 15000 : false,
-  });
-
   const ebookRequestStatus = requestStatus?.ebook ?? null;
   const audiobookRequestStatus = requestStatus?.audiobook ?? null;
   const ebookRequestAvailable = ebookRequestStatus === 'available';
   const audiobookRequestAvailable = audiobookRequestStatus === 'available';
-
-  const ebookReadarrBookId = requestStatus?.ebook_readarr_book_id;
-  const audiobookReadarrBookId = requestStatus?.audiobook_readarr_book_id;
-  const shouldCheckEbookReadarr =
-    Boolean(ebookReadarrBookId) && ebookRequestStatus !== 'available';
-  const shouldCheckAudiobookReadarr =
-    Boolean(audiobookReadarrBookId) && audiobookRequestStatus !== 'available';
-
-  const { data: ebookReadarrAvailability } = useQuery({
-    queryKey: ['readarr', 'availability', 'readarr', ebookReadarrBookId],
-    queryFn: () =>
-      readarrApi.getAvailabilityByReadarrId(ebookReadarrBookId as number, 'ebook'),
-    enabled: shouldCheckEbookReadarr,
-    refetchInterval: shouldCheckEbookReadarr ? 15000 : false,
-  });
-
-  const { data: audiobookReadarrAvailability } = useQuery({
-    queryKey: ['readarr', 'availability', 'readarr', audiobookReadarrBookId],
-    queryFn: () =>
-      readarrApi.getAvailabilityByReadarrId(audiobookReadarrBookId as number, 'audiobook'),
-    enabled: shouldCheckAudiobookReadarr,
-    refetchInterval: shouldCheckAudiobookReadarr ? 15000 : false,
-  });
 
   const { data: promptSummaries = [] } = useBookPrompts(
     hasHardcoverId ? (hardcoverId as number) : undefined,
@@ -117,6 +80,26 @@ export default function BookDetails() {
     },
     onError: (err: Error) => {
       toast.error('Failed to clear request', { description: err.message });
+    },
+  });
+
+  const clearAvailabilityMutation = useMutation({
+    mutationFn: async ({ bookId, formatType }: { bookId: number; formatType: 'ebook' | 'audiobook' }) => {
+      return booksApi.clearAvailability(bookId, formatType);
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['book', 'by-hardcover', hardcoverId] });
+      queryClient.invalidateQueries({ queryKey: ['requests', 'by-hardcover', hardcoverId] });
+      const formatName = variables.formatType === 'ebook' ? 'eBook' : 'Audiobook';
+      toast.success('Availability cleared', {
+        description: `${formatName} availability has been reset. You can now re-download this book.`,
+      });
+    },
+    onError: (err: Error, variables) => {
+      const formatName = variables.formatType === 'ebook' ? 'eBook' : 'Audiobook';
+      toast.error('Failed to clear availability', {
+        description: `Could not clear ${formatName} availability: ${err.message}`
+      });
     },
   });
 
@@ -192,15 +175,11 @@ export default function BookDetails() {
     dbBook?.ebook_available ||
     book.ebookAvailable ||
     ebookRequestAvailable ||
-    readarrAvailability?.ebook ||
-    ebookReadarrAvailability?.available ||
     false;
   const audiobookAvailable =
     dbBook?.audiobook_available ||
     book.audiobookAvailable ||
     audiobookRequestAvailable ||
-    readarrAvailability?.audiobook ||
-    audiobookReadarrAvailability?.available ||
     false;
   const ebookNotFound = ebookRequestStatus === 'not_found';
   const audiobookNotFound = audiobookRequestStatus === 'not_found';
@@ -331,15 +310,41 @@ export default function BookDetails() {
               {/* Availability Badges */}
               <div className="flex flex-wrap gap-2 pt-2">
                 {ebookAvailable && (
-                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/20 border border-emerald-500/30">
+                  <div className="group flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 relative">
                     <BookOpen className="h-4 w-4 text-emerald-400" />
                     <span className="text-sm font-medium text-emerald-400">eBook Available</span>
+                    {dbBook?.id && dbBook.ebook_available && (
+                      <button
+                        onClick={() => {
+                          if (window.confirm('Clear eBook availability? This will allow you to re-download this book.')) {
+                            clearAvailabilityMutation.mutate({ bookId: dbBook.id, formatType: 'ebook' });
+                          }
+                        }}
+                        className="ml-1 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:bg-emerald-500/30 rounded-full"
+                        title="Clear eBook availability"
+                      >
+                        <X className="h-3 w-3 text-emerald-400" />
+                      </button>
+                    )}
                   </div>
                 )}
                 {audiobookAvailable && (
-                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/20 border border-emerald-500/30">
+                  <div className="group flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 relative">
                     <BookOpen className="h-4 w-4 text-emerald-400" />
                     <span className="text-sm font-medium text-emerald-400">Audiobook Available</span>
+                    {dbBook?.id && dbBook.audiobook_available && (
+                      <button
+                        onClick={() => {
+                          if (window.confirm('Clear audiobook availability? This will allow you to re-download this book.')) {
+                            clearAvailabilityMutation.mutate({ bookId: dbBook.id, formatType: 'audiobook' });
+                          }
+                        }}
+                        className="ml-1 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:bg-emerald-500/30 rounded-full"
+                        title="Clear audiobook availability"
+                      >
+                        <X className="h-3 w-3 text-emerald-400" />
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -396,23 +401,6 @@ export default function BookDetails() {
                     >
                       <ExternalLink className="h-4 w-4 mr-2" />
                       View on Hardcover
-                    </a>
-                  </Button>
-                )}
-                {hasAnyRequests && readarrManageLink?.url && readarrManageLink?.readarr_book_id && (
-                  <Button
-                    size="lg"
-                    variant="outline"
-                    asChild
-                    className="border-border hover:bg-accent"
-                  >
-                    <a
-                      href={readarrManageLink.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      <ExternalLink className="h-4 w-4 mr-2" />
-                      Manage in Readarr
                     </a>
                   </Button>
                 )}

@@ -8,17 +8,18 @@ interface RequestCardProps {
   request: BookRequest;
 }
 
-const statusConfig = {
+const statusConfig: Record<string, { label: string; className: string }> = {
   requested: { label: 'Requested', className: 'status-requested' },
   approved: { label: 'Approved', className: 'status-approved' },
   processing: { label: 'Processing', className: 'status-approved' },
   available: { label: 'Available', className: 'status-available' },
   denied: { label: 'Denied', className: 'status-denied' },
   not_found: { label: 'Not Found', className: 'status-not-found' },
+  pending: { label: 'Pending', className: 'status-requested' },
 };
 
 export function RequestCard({ request }: RequestCardProps) {
-  const status = statusConfig[request.status];
+  const status = statusConfig[request.status] || { label: request.status, className: 'status-requested' };
   const year = new Date(request.book.publishedDate).getFullYear();
   const bookIdentifier =
     request.book.hardcoverId || request.book.hardcoverSlug || request.bookId;

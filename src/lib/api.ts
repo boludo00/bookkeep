@@ -330,6 +330,11 @@ export const booksApi = {
       method: 'DELETE',
     }),
 
+  clearAvailability: (id: number, formatType: 'ebook' | 'audiobook') =>
+    apiRequest<{ success: boolean; book_id: number; format_type: string; ebook_available: boolean; audiobook_available: boolean }>(
+      `/api/books/${id}/availability/${formatType}`,
+      { method: 'DELETE' }
+    ),
 };
 
 // Requests API endpoints
