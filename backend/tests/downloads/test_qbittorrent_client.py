@@ -96,10 +96,10 @@ class TestQBittorrentClientInit:
 
             assert client.use_ssl is True
 
-            # Verify QBClient was called with HTTPS=True
+            # Verify QBClient was called with https:// in the host URL
             mock_client_class.assert_called_once()
             call_kwargs = mock_client_class.call_args.kwargs
-            assert call_kwargs['HTTPS'] is True
+            assert "https://" in call_kwargs['host']
 
     def test_init_with_category(self):
         with patch('app.downloads.clients.qbittorrent.QBClient') as mock_client_class:
@@ -180,7 +180,10 @@ class TestTestConnection:
         assert result is True
 
     def test_failed_connection(self, mock_qb_client):
-        mock_qb_client.client.app.version = Mock(side_effect=Exception("Connection failed"))
+        # Make the version property raise an exception when accessed
+        type(mock_qb_client.client.app).version = property(
+            fget=Mock(side_effect=Exception("Connection failed"))
+        )
 
         result = mock_qb_client.test_connection()
 
@@ -376,8 +379,8 @@ class TestGetDownloadStatus:
 
         status = mock_qb_client.get_download_status("abc123")
 
-        # Path should be mapped
-        assert status["save_path"] == "/host/downloads/books/book.epub"
+        # save_path is mapped from torrent.save_path (not content_path)
+        assert status["save_path"] == "/host/downloads/books"
 
 
 class TestGetCompletedDownloadPath:
@@ -599,7 +602,10 @@ class TestGetClientInfo:
         assert info["preferences"] == mock_prefs
 
     def test_get_client_info_failure(self, mock_qb_client):
-        mock_qb_client.client.app.version = Mock(side_effect=Exception("Failed"))
+        # Make the version property raise an exception when accessed
+        type(mock_qb_client.client.app).version = property(
+            fget=Mock(side_effect=Exception("Failed"))
+        )
 
         info = mock_qb_client.get_client_info()
 
