@@ -11,17 +11,10 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
-import { requestsApi, booksApi, readarrApi, hardcoverApi } from '@/lib/api';
+import { requestsApi, booksApi } from '@/lib/api';
 import type { Book } from '@/types/book';
 
 interface RequestDialogProps {
@@ -70,20 +63,8 @@ export function RequestDialog({
 }: RequestDialogProps) {
   const [selectedFormat, setSelectedFormat] = useState<FormatSelection | null>(null);
   const [notes, setNotes] = useState('');
-  const [selectedEditionIds, setSelectedEditionIds] = useState<{ ebook?: number; audiobook?: number }>({});
-  const [errorDialogOpen, setErrorDialogOpen] = useState(false);
-  const [errorSummary, setErrorSummary] = useState('');
-  const [errorDetails, setErrorDetails] = useState('');
-  const [showErrorDetails, setShowErrorDetails] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const queryClient = useQueryClient();
-
-  // Fetch configured formats
-  const { data: configuredFormats, isLoading: isLoadingFormats } = useQuery({
-    queryKey: ['configured-formats'],
-    queryFn: () => readarrApi.getConfiguredFormats(),
-    staleTime: 5 * 60 * 1000, // 5 minutes
-  });
 
   // Fetch existing requests for this book
   const { data: existingRequests, isLoading: isLoadingRequests } = useQuery({
@@ -93,32 +74,16 @@ export function RequestDialog({
   });
 
   // Determine which formats are available to request
-  const ebookConfigured = configuredFormats?.ebook ?? false;
-  const audiobookConfigured = configuredFormats?.audiobook ?? false;
   const ebookAlreadyRequested = !!existingRequests?.ebook && existingRequests?.ebook !== 'not_found';
   const audiobookAlreadyRequested = !!existingRequests?.audiobook && existingRequests?.audiobook !== 'not_found';
-  
-  const canRequestEbook = ebookConfigured && !ebookAlreadyRequested && !disableFormats?.ebook;
-  const canRequestAudiobook = audiobookConfigured && !audiobookAlreadyRequested && !disableFormats?.audiobook;
+
+  const canRequestEbook = !ebookAlreadyRequested && !disableFormats?.ebook;
+  const canRequestAudiobook = !audiobookAlreadyRequested && !disableFormats?.audiobook;
   const canRequestBoth = canRequestEbook && canRequestAudiobook;
-
-  const { data: ebookEditions, isLoading: isLoadingEbookEditions } = useQuery({
-    queryKey: ['hardcover-editions', book.hardcoverId, 'ebook'],
-    queryFn: () => hardcoverApi.getEditions(book.hardcoverId as number, 'ebook'),
-    enabled: open && !!book.hardcoverId && canRequestEbook,
-    staleTime: 10 * 60 * 1000,
-  });
-
-  const { data: audiobookEditions, isLoading: isLoadingAudiobookEditions } = useQuery({
-    queryKey: ['hardcover-editions', book.hardcoverId, 'audiobook'],
-    queryFn: () => hardcoverApi.getEditions(book.hardcoverId as number, 'audiobook'),
-    enabled: open && !!book.hardcoverId && canRequestAudiobook,
-    staleTime: 10 * 60 * 1000,
-  });
 
   // Auto-select the only available format
   useEffect(() => {
-    if (!isLoadingFormats && !isLoadingRequests) {
+    if (!isLoadingRequests) {
       if (preferredFormat === 'ebook' && canRequestEbook) {
         setSelectedFormat('ebook');
       } else if (preferredFormat === 'audiobook' && canRequestAudiobook) {
@@ -133,7 +98,7 @@ export function RequestDialog({
         setSelectedFormat(null);
       }
     }
-  }, [canRequestEbook, canRequestAudiobook, canRequestBoth, isLoadingFormats, isLoadingRequests]);
+  }, [canRequestEbook, canRequestAudiobook, canRequestBoth, isLoadingRequests, preferredFormat]);
 
   // Reset state when dialog closes
   useEffect(() => {
@@ -141,34 +106,6 @@ export function RequestDialog({
       setNotes('');
     }
   }, [open]);
-
-  useEffect(() => {
-    if (!open) {
-      setSelectedEditionIds({});
-    }
-  }, [open]);
-
-  useEffect(() => {
-    if (!ebookEditions?.editions?.length) return;
-    if (selectedEditionIds.ebook) return;
-    const defaultId = ebookEditions.default_cover_edition_id;
-    const match = defaultId
-      ? ebookEditions.editions.find((edition) => edition.id === defaultId)
-      : undefined;
-    setSelectedEditionIds((prev) => ({
-      ...prev,
-      ebook: match?.id ?? ebookEditions.editions[0]?.id,
-    }));
-  }, [ebookEditions, selectedEditionIds.ebook]);
-
-  useEffect(() => {
-    if (!audiobookEditions?.editions?.length) return;
-    if (selectedEditionIds.audiobook) return;
-    setSelectedEditionIds((prev) => ({
-      ...prev,
-      audiobook: audiobookEditions.editions[0]?.id,
-    }));
-  }, [audiobookEditions, selectedEditionIds.audiobook]);
 
   // First, ensure the book exists in our database
   const ensureBookMutation = useMutation({
@@ -211,201 +148,67 @@ export function RequestDialog({
   });
 
   const createRequestMutation = useMutation({
-    mutationFn: async ({ bookId, format, editionId }: { bookId: number; format: string; editionId?: number }) => {
+    mutationFn: async ({ bookId, format }: { bookId: number; format: string }) => {
       return requestsApi.create({
         book_id: bookId,
         format: format,
-        edition_id: editionId,
         notes: notes || undefined,
       });
     },
   });
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!selectedFormat) return;
-    
-    const formatLabel = selectedFormat === 'both' ? 'eBook and Audiobook' : formatInfo[selectedFormat].label;
-    const currentNotes = notes;
-    const currentFormat = selectedFormat;
-    const toastId = `request-${book.hardcoverId}-${currentFormat}`;
-    setIsSubmitting(true);
-    
-    // Show pending toast
-    toast.loading(`Submitting ${formatLabel} request...`, {
-      id: toastId,
-    });
-    
-    // Process in background
-    (async () => {
-      try {
-        // Ensure book exists in database
-        const bookId = await ensureBookMutation.mutateAsync();
-        
-        // Create request(s) based on selection
-        const formatsToRequest = currentFormat === 'both' 
-          ? ['ebook', 'audiobook'] 
-          : [currentFormat];
-        
-        const requestResults = [];
-        for (const format of formatsToRequest) {
-          const editionId = selectedEditionIds[format as 'ebook' | 'audiobook'];
-          const result = await createRequestMutation.mutateAsync({ bookId, format, editionId });
-          requestResults.push({ format, result });
-        }
-        
-        // Invalidate queries
-        queryClient.invalidateQueries({ queryKey: ['requests'] });
-        queryClient.invalidateQueries({ queryKey: ['book-requests', book.hardcoverId] });
-        
-        const confirmations = requestResults.map(({ format, result }: any) => {
-          const label = format === 'ebook' ? 'eBook' : 'Audiobook';
-          if (!result?.readarrReceived) {
-            return `${label}: request created (Readarr not confirmed)`;
-          }
-          if (result?.readarrSearchTriggered === true) {
-            return `${label}: Readarr accepted + search triggered`;
-          }
-          if (result?.readarrSearchTriggered === false) {
-            const status = result?.readarrSearchStatusCode ? ` (status ${result.readarrSearchStatusCode})` : '';
-            return `${label}: Readarr accepted, search not confirmed${status}`;
-          }
-          return `${label}: Readarr accepted`;
-        });
 
-        const hasReadarrFailure = requestResults.some(({ result }: any) => result?.readarrReceived === false);
-        const toastFn = hasReadarrFailure ? toast.warning : toast.success;
-        toastFn('Request submitted!', {
-          id: toastId,
-          description: confirmations.length > 0
-            ? confirmations.join(' • ')
-            : `Your ${formatLabel} request for "${book.title}" has been sent.`,
-        });
-        setNotes('');
-        onOpenChange(false);
-      } catch (error: any) {
-        console.error('Request submission error:', error);
-        toast.dismiss(toastId);
-        const rawMessage = error?.message || 'Please try again.';
-        const marker = 'Failed to add to Readarr:';
-        const detail = rawMessage.includes(marker)
-          ? rawMessage.split(marker)[1].trim()
-          : rawMessage;
-        setErrorSummary(detail || 'Readarr rejected the request.');
-        setErrorDetails(rawMessage);
-        setShowErrorDetails(false);
-        setErrorDialogOpen(true);
-      } finally {
-        setIsSubmitting(false);
+    const formatLabel = selectedFormat === 'both' ? 'eBook and Audiobook' : formatInfo[selectedFormat].label;
+    setIsSubmitting(true);
+
+    try {
+      // Ensure book exists in database
+      const bookId = await ensureBookMutation.mutateAsync();
+
+      // Create request(s) based on selection
+      const formatsToRequest = selectedFormat === 'both'
+        ? ['ebook', 'audiobook']
+        : [selectedFormat];
+
+      for (const format of formatsToRequest) {
+        await createRequestMutation.mutateAsync({ bookId, format });
       }
-    })();
+
+      // Invalidate queries to trigger re-fetch
+      queryClient.invalidateQueries({ queryKey: ['requests'] });
+      queryClient.invalidateQueries({ queryKey: ['book-requests', book.hardcoverId] });
+      queryClient.invalidateQueries({ queryKey: ['requests', 'by-hardcover'] });
+
+      toast.success('Request submitted!', {
+        description: `Your ${formatLabel} request for "${book.title}" has been submitted.`,
+      });
+
+      setNotes('');
+      onOpenChange(false);
+    } catch (error: any) {
+      console.error('Request submission error:', error);
+      toast.error('Request failed', {
+        description: error?.message || 'Failed to submit request. Please try again.',
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const isLoading = isLoadingFormats || isLoadingRequests || isLoadingEbookEditions || isLoadingAudiobookEditions;
+  const isLoading = isLoadingRequests;
   const noFormatsAvailable = !canRequestEbook && !canRequestAudiobook;
 
-  const formatAudioDuration = (seconds?: number | null) => {
-    if (!seconds) return null;
-    const mins = Math.round(seconds / 60);
-    if (mins < 60) return `${mins} min`;
-    const hours = Math.floor(mins / 60);
-    const remaining = mins % 60;
-    return `${hours}h ${remaining}m`;
-  };
-
-  const renderEditionPicker = (
-    format: 'ebook' | 'audiobook',
-    editionsData?: {
-      editions: Array<any>;
-    }
-  ) => {
-    if (!editionsData?.editions?.length) {
-      return (
-        <div className="text-sm text-muted-foreground">
-          No editions found for this format.
-        </div>
-      );
-    }
-
-    const selectedId = selectedEditionIds[format];
-    const selectedEdition = editionsData.editions.find((edition) => edition.id === selectedId);
-
-    return (
-      <div className="space-y-3">
-        <Label className="text-foreground">
-          {format === 'ebook' ? 'eBook Edition' : 'Audiobook Edition'}
-        </Label>
-        <Select
-          value={selectedId ? String(selectedId) : undefined}
-          onValueChange={(value) =>
-            setSelectedEditionIds((prev) => ({
-              ...prev,
-              [format]: Number(value),
-            }))
-          }
-        >
-          <SelectTrigger className="bg-secondary border-border">
-            <SelectValue placeholder="Select an edition" />
-          </SelectTrigger>
-          <SelectContent>
-            {editionsData.editions.map((edition) => {
-              const language = edition.language || edition.language_code2 || 'Unknown';
-              const publisher = edition.publisher || 'Unknown';
-              const lengthOrPages =
-                format === 'audiobook'
-                  ? formatAudioDuration(edition.audio_seconds) || 'Unknown'
-                  : edition.pages || 'Unknown';
-              const score = edition.score ?? 'N/A';
-              return (
-                <SelectItem key={edition.id} value={String(edition.id)}>
-                  {`${edition.title || `Edition ${edition.id}`} • ${language} • ${publisher} • ${
-                    format === 'audiobook' ? 'Length' : 'Pages'
-                  }: ${lengthOrPages} • Score: ${score}`}
-                </SelectItem>
-              );
-            })}
-          </SelectContent>
-        </Select>
-
-        {selectedEdition && (
-          <div className="rounded-md border border-border bg-secondary/40 p-3 text-sm text-muted-foreground">
-            <div className="flex flex-wrap gap-4">
-              <span>
-                <span className="text-foreground">Language:</span>{' '}
-                {selectedEdition.language || selectedEdition.language_code2 || 'Unknown'}
-              </span>
-              <span>
-                <span className="text-foreground">Publisher:</span>{' '}
-                {selectedEdition.publisher || 'Unknown'}
-              </span>
-              <span>
-                <span className="text-foreground">
-                  {format === 'audiobook' ? 'Length:' : 'Pages:'}
-                </span>{' '}
-                {format === 'audiobook'
-                  ? formatAudioDuration(selectedEdition.audio_seconds) || 'Unknown'
-                  : selectedEdition.pages || 'Unknown'}
-              </span>
-              <span>
-                <span className="text-foreground">Score:</span>{' '}
-                {selectedEdition.score ?? 'N/A'}
-              </span>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
   return (
-    <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-md bg-card border-border">
-          <DialogHeader>
-            <DialogTitle className="text-foreground">Request Book</DialogTitle>
-            <DialogDescription className="text-muted-foreground">
-              Request "{book.title}" by {book.author}
-            </DialogDescription>
-          </DialogHeader>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md bg-card border-border">
+        <DialogHeader>
+          <DialogTitle className="text-foreground">Request Book</DialogTitle>
+          <DialogDescription className="text-muted-foreground">
+            Request "{book.title}" by {book.author}
+          </DialogDescription>
+        </DialogHeader>
 
         {isLoading ? (
           <div className="flex items-center justify-center py-8">
@@ -414,9 +217,7 @@ export function RequestDialog({
         ) : noFormatsAvailable ? (
           <div className="py-6 text-center space-y-4">
             <p className="text-muted-foreground">
-              {!ebookConfigured && !audiobookConfigured 
-                ? "No Readarr servers are configured. Please ask an administrator to set up a server."
-                : "All available formats have already been requested for this book."}
+              All available formats have already been requested for this book.
             </p>
             <div className="flex flex-wrap gap-2 justify-center">
               {existingRequests?.ebook && (
@@ -461,11 +262,8 @@ export function RequestDialog({
                       {getStatusBadge(existingRequests?.ebook ?? null)}
                     </div>
                   )}
-                  {!ebookConfigured && (
-                    <span className="text-xs text-muted-foreground">Not configured</span>
-                  )}
                 </button>
-                
+
                 {/* Audiobook option */}
                 <button
                   type="button"
@@ -486,11 +284,8 @@ export function RequestDialog({
                       {getStatusBadge(existingRequests?.audiobook ?? null)}
                     </div>
                   )}
-                  {!audiobookConfigured && (
-                    <span className="text-xs text-muted-foreground">Not configured</span>
-                  )}
                 </button>
-                
+
                 {/* Both option - only show when both are available */}
                 {canRequestBoth && (
                   <button
@@ -512,16 +307,6 @@ export function RequestDialog({
                 )}
               </div>
             </div>
-
-            {/* Edition Selection */}
-            {selectedFormat === 'ebook' && renderEditionPicker('ebook', ebookEditions)}
-            {selectedFormat === 'audiobook' && renderEditionPicker('audiobook', audiobookEditions)}
-            {selectedFormat === 'both' && (
-              <div className="space-y-4">
-                {renderEditionPicker('ebook', ebookEditions)}
-                {renderEditionPicker('audiobook', audiobookEditions)}
-              </div>
-            )}
 
             {/* Notes */}
             <div className="space-y-3">
@@ -566,35 +351,7 @@ export function RequestDialog({
             </Button>
           )}
         </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={errorDialogOpen} onOpenChange={setErrorDialogOpen}>
-        <DialogContent className="sm:max-w-md bg-card border-border">
-          <DialogHeader>
-            <DialogTitle className="text-foreground">Request Failed</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-              <span className="font-medium">Failed to add to Readarr.</span>{' '}
-              <span className="text-destructive/80">{errorSummary}</span>
-            </div>
-            <Button
-              type="button"
-              variant="ghost"
-              className="px-2 text-sm text-muted-foreground hover:text-foreground"
-              onClick={() => setShowErrorDetails((value) => !value)}
-            >
-              {showErrorDetails ? 'Hide Logs' : 'Show Logs'}
-            </Button>
-            {showErrorDetails && (
-              <pre className="max-h-56 overflow-auto rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
-                {errorDetails}
-              </pre>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
-    </>
+      </DialogContent>
+    </Dialog>
   );
 }

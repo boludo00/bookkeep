@@ -1,11 +1,12 @@
 import { NavLink, useLocation, Link } from 'react-router-dom';
-import { Compass, Clock, Settings, Users, Shield, BookOpen } from 'lucide-react';
+import { Compass, Clock, Settings, Users, Shield, BookOpen, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUser } from '@/contexts/UserContext';
 
 const navItems = [
   { to: '/', icon: Compass, label: 'Discover' },
   { to: '/requests', icon: Clock, label: 'Requests' },
+  { to: '/downloads', icon: Download, label: 'Downloads' },
   { to: '/series', icon: BookOpen, label: 'Series' },
 ];
 

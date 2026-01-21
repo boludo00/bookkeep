@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from 'sonner';
-import { usersApi } from '@/lib/api';
+import { usersApi, authApi } from '@/lib/api';
 import { Loader2 } from 'lucide-react';
 import { BookkeepLogo } from '@/components/brand/BookkeepLogo';
 
@@ -30,7 +30,10 @@ export default function AdminSetup() {
 
   const createAdminMutation = useMutation({
     mutationFn: async (data: { email: string; username: string; password: string; full_name?: string }) => {
-      return usersApi.create({ ...data, is_admin: true });
+      // First create the user
+      await usersApi.create({ ...data, is_admin: true });
+      // Then log them in to get JWT tokens
+      await authApi.login(data.username, data.password);
     },
     onSuccess: async () => {
       toast.success('Admin user created successfully!', {
@@ -40,6 +43,8 @@ export default function AdminSetup() {
       await queryClient.invalidateQueries({ queryKey: ['admin-exists'] });
       // Navigate to home page
       navigate('/');
+      // Force a page reload to refresh user context
+      window.location.reload();
     },
     onError: (error: Error) => {
       toast.error('Failed to create admin user', {

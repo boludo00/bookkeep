@@ -1,12 +1,17 @@
 """
-Simple authentication dependency for getting current user.
-For now, uses a header-based user_id, but can be extended with JWT tokens later.
+JWT-based authentication for Book Hound.
 """
 from fastapi import Header, HTTPException, status, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from app import database, models
+from app.jwt import verify_access_token, TokenData
 from typing import Optional
 import bcrypt
+
+
+# HTTP Bearer scheme for JWT tokens
+security = HTTPBearer(auto_error=False)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -14,64 +19,79 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     try:
         # Convert to bytes
         password_bytes = plain_password.encode('utf-8')
-        
+
         # Handle potential encoding issues with stored hash
         if isinstance(hashed_password, str):
             hashed_bytes = hashed_password.encode('utf-8')
         else:
             hashed_bytes = hashed_password
-        
+
         return bcrypt.checkpw(password_bytes, hashed_bytes)
     except Exception:
         return False
 
-# Temporary: For development, we'll use a simple header-based approach
-# In production, this should use JWT tokens or session-based auth
 
 async def get_current_user(
-    x_user_id: Optional[int] = Header(None, alias="X-User-Id"),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: Session = Depends(database.get_db)
 ) -> models.User:
     """
-    Get current user from X-User-Id header.
-    Defaults to user_id=1 if not provided (for development).
+    Get current user from JWT Bearer token.
+    Raises 401 if token is missing or invalid.
     """
-    user_id = x_user_id if x_user_id is not None else 1
-    
-    user = db.query(models.User).filter(models.User.id == user_id).first()
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    if credentials is None:
+        raise credentials_exception
+
+    token = credentials.credentials
+    token_data = verify_access_token(token)
+
+    if token_data is None:
+        raise credentials_exception
+
+    user = db.query(models.User).filter(models.User.id == token_data.user_id).first()
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
+        raise credentials_exception
+
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is inactive"
         )
-    
+
     return user
 
+
 async def get_current_user_optional(
-    x_user_id: Optional[int] = Header(None, alias="X-User-Id"),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: Session = Depends(database.get_db)
 ) -> Optional[models.User]:
-    """Get current user optionally (returns None if not provided)"""
-    if x_user_id is None:
+    """Get current user optionally (returns None if no valid token)."""
+    if credentials is None:
         return None
-    
-    user = db.query(models.User).filter(models.User.id == x_user_id).first()
+
+    token = credentials.credentials
+    token_data = verify_access_token(token)
+
+    if token_data is None:
+        return None
+
+    user = db.query(models.User).filter(models.User.id == token_data.user_id).first()
     if user and not user.is_active:
         return None
     return user
 
+
 def require_admin(current_user: models.User = Depends(get_current_user)) -> models.User:
-    """Require admin privileges"""
+    """Require admin privileges."""
     if not current_user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privileges required"
         )
     return current_user
-

@@ -45,6 +45,7 @@ interface User {
   can_request_ebook?: boolean;
   can_request_audiobook?: boolean;
   can_request_physical?: boolean;
+  can_download?: boolean;
   auto_approve_ebooks?: boolean;
   auto_approve_audiobooks?: boolean;
   auto_approve_physical?: boolean;
@@ -69,6 +70,7 @@ export default function Users() {
     is_active: true,
     can_request_ebook: true,
     can_request_audiobook: true,
+    can_download: true,
     auto_approve_ebooks: true,
     auto_approve_audiobooks: true,
   });
@@ -135,6 +137,7 @@ export default function Users() {
       is_active: true,
       can_request_ebook: true,
       can_request_audiobook: true,
+      can_download: true,
       auto_approve_ebooks: true,
       auto_approve_audiobooks: true,
     });
@@ -165,6 +168,7 @@ export default function Users() {
       is_active: user.is_active,
       can_request_ebook: user.can_request_ebook ?? true,
       can_request_audiobook: user.can_request_audiobook ?? true,
+      can_download: user.can_download ?? true,
       auto_approve_ebooks: user.auto_approve_ebooks ?? true,
       auto_approve_audiobooks: user.auto_approve_audiobooks ?? true,
     });
@@ -173,7 +177,7 @@ export default function Users() {
 
   const handleUpdate = () => {
     if (!selectedUser) return;
-    
+
     const update: any = {
       email: formData.email,
       username: formData.username,
@@ -182,10 +186,11 @@ export default function Users() {
       is_active: formData.is_active,
       can_request_ebook: formData.can_request_ebook,
       can_request_audiobook: formData.can_request_audiobook,
+      can_download: formData.can_download,
       auto_approve_ebooks: formData.auto_approve_ebooks,
       auto_approve_audiobooks: formData.auto_approve_audiobooks,
     };
-    
+
     updateUserMutation.mutate({ id: selectedUser.id, update });
   };
 
@@ -520,6 +525,18 @@ export default function Users() {
                   <Switch
                     checked={formData.can_request_audiobook}
                     onCheckedChange={(checked) => setFormData({ ...formData, can_request_audiobook: checked })}
+                  />
+                </div>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label className="text-foreground">Can Download</Label>
+                    <p className="text-sm text-muted-foreground">
+                      Allow user to search indexers and download books
+                    </p>
+                  </div>
+                  <Switch
+                    checked={formData.can_download}
+                    onCheckedChange={(checked) => setFormData({ ...formData, can_download: checked })}
                   />
                 </div>
               </div>

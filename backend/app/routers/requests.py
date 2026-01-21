@@ -5,7 +5,7 @@ from typing import Optional, List
 from datetime import datetime, timedelta, timezone
 import structlog
 from app import database, models, schemas
-from app.cache import get_cached, set_cached, delete_cached, make_cache_key, CACHE_TTL
+from app.cache import get_cached, set_cached, delete_cached, make_cache_key, CACHE_TTL, clear_cache_pattern
 from app.auth import get_current_user, require_admin
 from app.routers.readarr import add_book_to_readarr
 from app.services.readarr_service import (
@@ -58,7 +58,7 @@ async def create_request(
             detail=f"You do not have permission to request {request.format}s"
         )
 
-    # Block requests for formats already available in Readarr
+    # Optional: Block requests for formats already available in Readarr (if configured)
     try:
         if book.hardcover_id and await is_format_available_in_readarr(
             db,
@@ -73,7 +73,8 @@ async def create_request(
     except HTTPException:
         raise
     except Exception as e:
-        logger.warning("readarr_availability_check_failed", error=str(e))
+        # Don't fail the request if Readarr check fails - just log it
+        logger.warning("readarr_availability_check_failed", error=str(e), book_id=book.id)
 
     # Check if this book+format already has a request (global - any user)
     # Only allow new requests if existing ones are denied or don't exist
@@ -131,7 +132,7 @@ async def create_request(
         db_request.readarr_search_status_code = None
         db_request.readarr_message = None
         db_request.edition_id = request.edition_id
-        db_request.updated_at = datetime.now()
+        db_request.updated_at = datetime.now(timezone.utc)
         db.add(db_request)
         db.commit()
         db.refresh(db_request)
@@ -155,79 +156,54 @@ async def create_request(
         joinedload(models.BookRequest.user)
     ).filter(models.BookRequest.id == db_request.id).first()
     
-    # Automatically add to Readarr if auto-approved or if manually approved
-    if auto_approve or db_request.status == "approved":
+    # Automatically trigger download if auto-approved
+    if auto_approve:
         try:
-            # Get appropriate Readarr server based on format
-            readarr_server = get_readarr_server_for_format(db_request.format, db)
-            
-            if readarr_server:
-                # Refresh server from database to ensure we have latest config
-                db.refresh(readarr_server)
-                logger.info("readarr_server_selected", 
-                           server_id=readarr_server.id,
-                           server_name=readarr_server.name,
-                           format=db_request.format,
-                           auto_approve=auto_approve)
-                # Add book to Readarr
-                try:
-                    result = await add_book_to_readarr(
-                        readarr_server,
-                        db_request.book,
-                        db_request.format,
-                        db,
-                        edition_id=db_request.edition_id
-                    )
-                    readarr_book_id = result.get("readarr_book_id")
-                    db_request.readarr_received = result.get("readarr_received")
-                    db_request.readarr_search_triggered = result.get("search_triggered")
-                    db_request.readarr_search_status_code = result.get("search_status_code")
-                    db_request.readarr_message = result.get("message")
-                    logger.info(
-                        "request_sent_to_readarr_on_create",
-                        request_id=db_request.id,
-                        readarr_book_id=readarr_book_id,
-                        server_id=readarr_server.id,
-                        auto_approve=auto_approve
-                    )
-                    # Update status to processing and store readarr_book_id
-                    db_request.status = "processing"
-                    if readarr_book_id:
-                        db_request.readarr_book_id = readarr_book_id
-                    db.commit()
-                    # Refresh to get updated status
-                    db.refresh(db_request)
-                except Exception as e:
-                    logger.error(
-                        "readarr_add_failed_on_create",
-                        request_id=db_request.id,
-                        error=str(e)
-                    )
-                    # If Readarr add fails, do not keep the request around.
-                    db.delete(db_request)
-                    db.commit()
-                    raise HTTPException(
-                        status_code=status.HTTP_502_BAD_GATEWAY,
-                        detail=f"Failed to add to Readarr: {str(e)}"
-                    )
-            else:
-                logger.warning(
-                    "request_created_no_readarr_server",
+            # Import download orchestrator
+            from app.downloads import DownloadOrchestrator
+
+            # Trigger automatic download via Prowlarr
+            orchestrator = DownloadOrchestrator(db_session=db)
+            task = orchestrator.search_and_download(
+                book=db_request.book,
+                format_type=db_request.format,
+                source_name="prowlarr"
+            )
+
+            if task:
+                logger.info(
+                    "auto_download_triggered",
                     request_id=db_request.id,
+                    task_id=task.id,
                     format=db_request.format
                 )
-                # Keep status as requested/approved if no Readarr server configured
-        except HTTPException:
-            raise
+                # Update status to processing since download started
+                db_request.status = "processing"
+                db.commit()
+                db.refresh(db_request)
+            else:
+                logger.warning(
+                    "auto_download_no_releases",
+                    request_id=db_request.id,
+                    book_id=db_request.book_id,
+                    format=db_request.format
+                )
+                # Keep as approved but log that no releases found
         except Exception as e:
-            logger.error("request_creation_error", request_id=db_request.id, error=str(e))
-            # Don't fail the request creation, just log the error
+            logger.error(
+                "auto_download_failed",
+                request_id=db_request.id,
+                error=str(e)
+            )
+            # Don't fail the request - just keep it as approved for manual fulfillment
     
     # Convert book.genres from comma-separated string to list for response
     _normalize_book_genres(db_request.book)
 
     if book.hardcover_id:
         await delete_cached(make_cache_key("requests_by_hardcover", hardcover_id=book.hardcover_id))
+        # Also clear batch caches that might contain this book
+        await clear_cache_pattern("requests_by_hardcover_batch:*")
 
     return db_request
 
@@ -445,7 +421,9 @@ async def clear_requests_for_book(
     db.commit()
 
     await delete_cached(make_cache_key("requests_by_hardcover", hardcover_id=hardcover_id))
-    
+    # Clear batch caches
+    await clear_cache_pattern("requests_by_hardcover_batch:*")
+
     logger.info("requests_cleared",
                hardcover_id=hardcover_id,
                book_id=book.id,
@@ -453,7 +431,7 @@ async def clear_requests_for_book(
                formats=deleted_formats,
                user_id=current_user.id,
                is_admin=current_user.is_admin)
-    
+
     return {
         "message": f"Cleared {deleted_count} request(s)",
         "deleted_count": deleted_count,
@@ -498,6 +476,8 @@ async def request_series(
     skipped_count = 0
     already_available = 0
     already_requested = 0
+    failed_count = 0
+    failed_books = []  # Track which books failed for better user feedback
 
     availability_map = {}
     hardcover_ids = [book.hardcover_id for book in books_in_series if book.hardcover_id]
@@ -550,7 +530,7 @@ async def request_series(
         initial_status = "approved" if should_auto_approve else "requested"
         
         # Create the request
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         new_request = models.BookRequest(
             book_id=book.id,
             user_id=current_user.id,
@@ -579,23 +559,53 @@ async def request_series(
                     new_request.status = "processing"
                     if readarr_book_id:
                         new_request.readarr_book_id = readarr_book_id
+
+                    # Store Readarr tracking information
+                    new_request.readarr_received = True
+                    new_request.readarr_search_triggered = result.get("readarr_search_triggered")
+                    new_request.readarr_search_status_code = result.get("readarr_search_status_code")
+
                     logger.info("series_book_added_to_readarr",
                                series_id=series_id,
                                book_id=book.id,
                                book_title=book.title,
                                readarr_book_id=readarr_book_id)
                 except Exception as e:
+                    error_msg = str(e)
                     logger.warning("series_book_readarr_failed",
                                   series_id=series_id,
                                   book_id=book.id,
                                   book_title=book.title,
-                                  error=str(e))
-                    new_request.notes = (new_request.notes or "") + f"\n[Error] Readarr: {str(e)}"
+                                  error=error_msg)
+
+                    # Mark request as failed and rollback this specific request
+                    new_request.readarr_received = False
+                    new_request.readarr_message = error_msg
+                    new_request.notes = (new_request.notes or "") + f"\n[Error] Readarr: {error_msg}"
+
+                    # Track the failure for user feedback
+                    failed_count += 1
+                    failed_books.append({
+                        "title": book.title,
+                        "position": book.series_position,
+                        "error": error_msg
+                    })
+
+                    # Don't count this as successfully requested
+                    requested_count -= 1
             else:
                 logger.warning("series_book_no_readarr_server",
                               series_id=series_id,
                               book_id=book.id,
                               format=format)
+                new_request.notes = (new_request.notes or "") + f"\n[Error] No Readarr server configured for {format}"
+                failed_count += 1
+                failed_books.append({
+                    "title": book.title,
+                    "position": book.series_position,
+                    "error": f"No Readarr server configured for {format}"
+                })
+                requested_count -= 1
         
         requested_count += 1
         
@@ -608,16 +618,26 @@ async def request_series(
                    user_id=current_user.id)
     
     db.commit()
-    
+
+    # Clear batch cache for all books in this series
+    for book in books_in_series:
+        if book.hardcover_id:
+            await delete_cached(make_cache_key("requests_by_hardcover", hardcover_id=book.hardcover_id))
+
+    # Clear all batch caches (they contain combinations of hardcover IDs)
+    # This is a bit aggressive but necessary since batch caches contain arbitrary combinations
+    await clear_cache_pattern("requests_by_hardcover_batch:*")
+
     logger.info("series_request_complete",
                series_id=series_id,
                requested_count=requested_count,
                skipped_count=skipped_count,
                already_available=already_available,
                already_requested=already_requested,
+               failed_count=failed_count,
                format=format,
                user_id=current_user.id)
-    
+
     return {
         "series_id": series_id,
         "format": format,
@@ -625,6 +645,8 @@ async def request_series(
         "skipped_count": skipped_count,
         "already_available": already_available,
         "already_requested": already_requested,
+        "failed_count": failed_count,
+        "failed_books": failed_books if failed_books else None,
         "total_books": len(books_in_series)
     }
 
@@ -704,7 +726,19 @@ async def clear_series_requests(
                 db.add(book)
     
     db.commit()
-    
+
+    # Clear individual and batch caches for all affected books
+    affected_hardcover_ids = []
+    for book_id in affected_books:
+        book = db.query(models.Book).filter(models.Book.id == book_id).first()
+        if book and book.hardcover_id:
+            affected_hardcover_ids.append(book.hardcover_id)
+            await delete_cached(make_cache_key("requests_by_hardcover", hardcover_id=book.hardcover_id))
+
+    # Clear batch caches
+    if affected_hardcover_ids:
+        await clear_cache_pattern("requests_by_hardcover_batch:*")
+
     logger.info("series_requests_cleared",
                series_id=series_id,
                deleted_count=deleted_count,
@@ -712,7 +746,7 @@ async def clear_series_requests(
                affected_books=len(affected_books),
                user_id=current_user.id,
                is_admin=current_user.is_admin)
-    
+
     return {
         "message": f"Cleared {deleted_count} request(s) for series",
         "series_id": series_id,
@@ -854,7 +888,9 @@ async def update_request(
         await delete_cached(
             make_cache_key("requests_by_hardcover", hardcover_id=db_request.book.hardcover_id)
         )
-    
+        # Clear batch caches
+        await clear_cache_pattern("requests_by_hardcover_batch:*")
+
     return db_request
 
 @router.delete("/{request_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -870,6 +906,8 @@ async def delete_request(request_id: int, db: Session = Depends(database.get_db)
     db.commit()
     if hardcover_id:
         await delete_cached(make_cache_key("requests_by_hardcover", hardcover_id=hardcover_id))
+        # Clear batch caches
+        await clear_cache_pattern("requests_by_hardcover_batch:*")
     return None
 
 def _extract_readarr_book_id_from_notes(admin_notes: str) -> Optional[int]:

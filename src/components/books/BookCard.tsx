@@ -42,9 +42,9 @@ export function BookCard({
   const requestStatuses = statusSource
     ? [statusSource.ebook, statusSource.audiobook].filter((value): value is string => !!value)
     : [];
-  const hasActiveRequest = enableRequestStatus
-    ? requestStatuses.some((value) => value !== 'not_found' && value !== 'available')
-    : false;
+  const hasActiveRequest = requestStatuses.some(
+    (value) => value !== 'not_found' && value !== 'available'
+  );
   const effectiveStatus = status !== 'none' ? status : hasActiveRequest ? 'requested' : 'none';
   const bookLink = book.seriesId
     ? `/book/${book.id}?seriesId=${book.seriesId}`

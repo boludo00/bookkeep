@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Set DATABASE_URL explicitly to ensure it points to the correct location
-export DATABASE_URL="${DATABASE_URL:-sqlite:////app/data/bookhound.db}"
+export DATABASE_URL="${DATABASE_URL:-sqlite:////app/data/bookkeep.db}"
 
 if [[ "$DATABASE_URL" == sqlite:* ]]; then
     # Ensure data directory exists (where SQLite DB will be created)
@@ -19,9 +19,9 @@ echo "Working directory: $(pwd)"
 echo "PYTHONPATH: $PYTHONPATH"
 echo "DATABASE_URL: $DATABASE_URL"
 if [[ "$DATABASE_URL" == sqlite:* ]]; then
-    echo "Database file will be at: /app/data/bookhound.db"
+    echo "Database file will be at: /app/data/bookkeep.db"
     # Check if database file exists
-    if [ -f "/app/data/bookhound.db" ]; then
+    if [ -f "/app/data/bookkeep.db" ]; then
         echo "Database file exists"
     else
         echo "Database file does not exist yet (will be created by migration)"

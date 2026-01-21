@@ -1,12 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 from typing import Optional
 import bcrypt
 from app import database, models, schemas
-from app.auth import require_admin
+from app.auth import get_current_user, require_admin
 
 router = APIRouter()
+
 
 def get_password_hash(password: str) -> str:
     # Ensure password is a string and bytes
@@ -28,6 +28,7 @@ def get_password_hash(password: str) -> str:
     hashed = bcrypt.hashpw(password_bytes, salt)
     return hashed.decode('utf-8')
 
+
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     # Ensure password is bytes
     if not isinstance(plain_password, str):
@@ -45,32 +46,12 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return bcrypt.checkpw(password_bytes, hashed_bytes)
 
 
-from fastapi import Header
-
-def get_current_user_id(x_user_id: str = Header(..., alias="X-User-Id")) -> int:
-    """Extract user ID from X-User-Id header"""
-    try:
-        return int(x_user_id)
-    except (ValueError, TypeError):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid user ID"
-        )
-
-
 @router.get("/me", response_model=schemas.UserResponse)
-def get_current_user(
-    db: Session = Depends(database.get_db),
-    user_id: int = Depends(get_current_user_id)
+async def get_current_user_info(
+    current_user: models.User = Depends(get_current_user)
 ):
     """Get the current logged-in user's information"""
-    db_user = db.query(models.User).filter(models.User.id == user_id).first()
-    if not db_user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    return db_user
+    return current_user
 
 
 class PasswordChangeRequest(schemas.BaseModel):
@@ -79,35 +60,39 @@ class PasswordChangeRequest(schemas.BaseModel):
 
 
 @router.put("/me/password")
-def change_password(
+async def change_password(
     request: PasswordChangeRequest,
     db: Session = Depends(database.get_db),
-    user_id: int = Depends(get_current_user_id)
+    current_user: models.User = Depends(get_current_user)
 ):
     """Change the current user's password"""
-    db_user = db.query(models.User).filter(models.User.id == user_id).first()
-    if not db_user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
     # Verify current password
-    if not verify_password(request.current_password, db_user.hashed_password):
+    if not verify_password(request.current_password, current_user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Current password is incorrect"
         )
-    
+
     # Update password
-    db_user.hashed_password = get_password_hash(request.new_password)
+    current_user.hashed_password = get_password_hash(request.new_password)
     db.commit()
-    
+
     return {"message": "Password changed successfully"}
 
 
+@router.get("/check/admin-exists", response_model=dict)
+def check_admin_exists(db: Session = Depends(database.get_db)):
+    """Check if any admin users exist (public endpoint for initial setup)"""
+    admin_count = db.query(models.User).filter(models.User.is_admin == True).count()
+    return {"admin_exists": admin_count > 0}
+
+
 @router.get("/{user_id}", response_model=schemas.UserResponse)
-def get_user(user_id: int, db: Session = Depends(database.get_db)):
+async def get_user(
+    user_id: int,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user)
+):
     db_user = db.query(models.User).filter(models.User.id == user_id).first()
     if not db_user:
         raise HTTPException(
@@ -116,26 +101,28 @@ def get_user(user_id: int, db: Session = Depends(database.get_db)):
         )
     return db_user
 
+
 @router.get("/", response_model=list[schemas.UserResponse])
-def get_users(
+async def get_users(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
-    db: Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user)
 ):
     users = db.query(models.User).offset(skip).limit(limit).all()
     return users
 
-@router.get("/check/admin-exists", response_model=dict)
-def check_admin_exists(db: Session = Depends(database.get_db)):
-    """Check if any admin users exist"""
-    admin_count = db.query(models.User).filter(models.User.is_admin == True).count()
-    return {"admin_exists": admin_count > 0}
 
 @router.post("/", response_model=schemas.UserResponse, status_code=status.HTTP_201_CREATED)
 def create_user(
-    user: schemas.UserCreate, 
+    user: schemas.UserCreate,
     db: Session = Depends(database.get_db)
 ):
+    """
+    Create a new user.
+    - If no admin exists, this endpoint is public and creates the first admin.
+    - If admins exist, only admins can create new users.
+    """
     # Validate password length (bcrypt has a 72-byte limit)
     password_bytes = user.password.encode('utf-8')
     if len(password_bytes) > 72:
@@ -143,13 +130,13 @@ def create_user(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Password cannot be longer than 72 bytes. Please use a shorter password."
         )
-    
+
     if len(user.password) < 8:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Password must be at least 8 characters long"
         )
-    
+
     # Check if user already exists
     db_user = db.query(models.User).filter(
         (models.User.email == user.email) | (models.User.username == user.username)
@@ -159,10 +146,10 @@ def create_user(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email or username already registered"
         )
-    
+
     # Check if admin users exist
     admin_exists = db.query(models.User).filter(models.User.is_admin == True).count() > 0
-    
+
     # If admin exists and trying to create admin, deny (unless authenticated as admin)
     # For now, allow admin creation only if no admin exists
     if user.is_admin and admin_exists:
@@ -170,7 +157,7 @@ def create_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin users already exist. Only existing admins can create new admins."
         )
-    
+
     # Create new user
     hashed_password = get_password_hash(user.password)
     db_user = models.User(
@@ -184,31 +171,32 @@ def create_user(
         auto_approve_ebooks=user.auto_approve_ebooks if user.auto_approve_ebooks is not None else True,
         auto_approve_audiobooks=user.auto_approve_audiobooks if user.auto_approve_audiobooks is not None else True,
     )
-    
+
     # If no admin exists, make this user an admin (regardless of is_admin flag)
     if not admin_exists:
         db_user.is_admin = True
-    
+
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
     return db_user
 
+
 @router.put("/{user_id}", response_model=schemas.UserResponse)
-def update_user(
+async def update_user(
     user_id: int,
     user_update: schemas.UserUpdate,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(require_admin)
 ):
-    """Update user information and permissions"""
+    """Update user information and permissions (admin only)"""
     db_user = db.query(models.User).filter(models.User.id == user_id).first()
     if not db_user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
-    
+
     # Update fields if provided
     if user_update.email is not None:
         # Check if email is already taken by another user
@@ -222,7 +210,7 @@ def update_user(
                 detail="Email already registered"
             )
         db_user.email = user_update.email
-    
+
     if user_update.username is not None:
         # Check if username is already taken by another user
         existing = db.query(models.User).filter(
@@ -235,34 +223,31 @@ def update_user(
                 detail="Username already taken"
             )
         db_user.username = user_update.username
-    
+
     if user_update.full_name is not None:
         db_user.full_name = user_update.full_name
-    
+
     if user_update.is_active is not None:
         db_user.is_active = user_update.is_active
-    
+
     if user_update.is_admin is not None:
         db_user.is_admin = user_update.is_admin
-    
+
     if user_update.auto_approve_ebooks is not None:
         db_user.auto_approve_ebooks = user_update.auto_approve_ebooks
-    
+
     if user_update.auto_approve_audiobooks is not None:
         db_user.auto_approve_audiobooks = user_update.auto_approve_audiobooks
-    
+
     if user_update.can_request_ebook is not None:
         db_user.can_request_ebook = user_update.can_request_ebook
-    
+
     if user_update.can_request_audiobook is not None:
         db_user.can_request_audiobook = user_update.can_request_audiobook
-    
-    if user_update.auto_approve_ebooks is not None:
-        db_user.auto_approve_ebooks = user_update.auto_approve_ebooks
-    
-    if user_update.auto_approve_audiobooks is not None:
-        db_user.auto_approve_audiobooks = user_update.auto_approve_audiobooks
-    
+
+    if user_update.can_download is not None:
+        db_user.can_download = user_update.can_download
+
     # Prevent removing the last admin
     if user_update.is_admin is False and db_user.is_admin:
         admin_count = db.query(models.User).filter(
@@ -274,25 +259,26 @@ def update_user(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cannot remove admin privileges from the last admin"
             )
-    
+
     db.commit()
     db.refresh(db_user)
     return db_user
 
+
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_user(
+async def delete_user(
     user_id: int,
     db: Session = Depends(database.get_db),
     current_user: models.User = Depends(require_admin)
 ):
-    """Delete a user"""
+    """Delete a user (admin only)"""
     db_user = db.query(models.User).filter(models.User.id == user_id).first()
     if not db_user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
-    
+
     # Prevent deleting the last admin
     if db_user.is_admin:
         admin_count = db.query(models.User).filter(
@@ -304,8 +290,7 @@ def delete_user(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cannot delete the last admin user"
             )
-    
+
     db.delete(db_user)
     db.commit()
     return None
-

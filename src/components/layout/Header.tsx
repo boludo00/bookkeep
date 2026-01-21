@@ -105,7 +105,7 @@ export function Header({ onMenuClick }: HeaderProps) {
           onSubmit={handleSearch}
           className="order-3 w-full flex gap-2 sm:order-2 sm:w-auto sm:flex-1"
         >
-          <div className="relative flex-1">
+          <div className="relative flex-1 z-40">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               type="search"

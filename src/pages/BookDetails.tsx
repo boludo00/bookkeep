@@ -1,14 +1,15 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Star, Calendar, BookOpen, Tag, Clock, Users, Headphones, Library, ExternalLink, Trash2 } from 'lucide-react';
+import { ArrowLeft, Star, Calendar, BookOpen, Tag, Clock, Users, Headphones, Library, ExternalLink, Trash2, Search, X } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { RequestDialog } from '@/components/books/RequestDialog';
+import { SearchReleaseDialog } from '@/components/books/SearchReleaseDialog';
 import { BookCard } from '@/components/books/BookCard';
 import { useBookDetails, useBookPrompts } from '@/hooks/useHardcoverBooks';
-import { requestsApi, readarrApi } from '@/lib/api';
+import { requestsApi, booksApi } from '@/lib/api';
 import { transformHardcoverBook } from '@/lib/hardcover';
 import { toast } from 'sonner';
 import { useUser } from '@/contexts/UserContext';
@@ -17,8 +18,8 @@ export default function BookDetails() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
   const [requestOpen, setRequestOpen] = useState(false);
-  const [promptViewCounts, setPromptViewCounts] = useState<Record<string, number>>({});
-  const promptScrollLocks = useRef<Record<string, boolean>>({});
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchFormat, setSearchFormat] = useState<'ebook' | 'audiobook'>('ebook');
   const queryClient = useQueryClient();
   const { user } = useUser();
   const bypassCache =
@@ -28,54 +29,34 @@ export default function BookDetails() {
   const hardcoverId = book?.hardcoverId ?? (book?.id ? Number(book.id) : undefined);
   const hasHardcoverId = Number.isFinite(hardcoverId);
 
+  // Query our database to get actual book data including download status
+  const { data: dbBook } = useQuery({
+    queryKey: ['book', 'by-hardcover', hardcoverId],
+    queryFn: async () => {
+      if (!hardcoverId) return null;
+      // Get all books and find by hardcover_id
+      const books = await booksApi.getAll(0, 1000);
+      return books.find((b: any) => b.hardcover_id === hardcoverId) || null;
+    },
+    enabled: hasHardcoverId,
+    staleTime: 5 * 1000, // Cache for 5 seconds to see downloads quickly
+    refetchInterval: hasHardcoverId ? 5000 : false, // Poll every 5s for download updates
+  });
+
   const { data: requestStatus } = useQuery({
     queryKey: ['requests', 'by-hardcover', hardcoverId],
     queryFn: () => requestsApi.getByHardcoverId(hardcoverId as number),
     enabled: hasHardcoverId,
-    refetchInterval: hasHardcoverId ? 15000 : false,
-  });
-
-  const hasAnyRequestsForReadarr = Boolean(requestStatus?.ebook || requestStatus?.audiobook);
-  const { data: readarrManageLink } = useQuery({
-    queryKey: ['readarr', 'manage-link', hardcoverId],
-    queryFn: () => readarrApi.getManageLink(hardcoverId as number),
-    enabled: hasHardcoverId && hasAnyRequestsForReadarr,
-  });
-
-  const { data: readarrAvailability } = useQuery({
-    queryKey: ['readarr', 'availability', hardcoverId],
-    queryFn: () => readarrApi.getAvailability(hardcoverId as number),
-    enabled: hasHardcoverId,
-    refetchInterval: hasHardcoverId ? 15000 : false,
+    staleTime: 15 * 1000, // Cache for 15 seconds - balanced for real-time updates
+    refetchOnMount: true, // Refetch on mount but use cache if fresh
+    refetchInterval: hasHardcoverId ? 30000 : false, // Poll every 30s instead of 15s
+    gcTime: 5 * 60 * 1000, // Keep in cache for 5 minutes
   });
 
   const ebookRequestStatus = requestStatus?.ebook ?? null;
   const audiobookRequestStatus = requestStatus?.audiobook ?? null;
   const ebookRequestAvailable = ebookRequestStatus === 'available';
   const audiobookRequestAvailable = audiobookRequestStatus === 'available';
-
-  const ebookReadarrBookId = requestStatus?.ebook_readarr_book_id;
-  const audiobookReadarrBookId = requestStatus?.audiobook_readarr_book_id;
-  const shouldCheckEbookReadarr =
-    Boolean(ebookReadarrBookId) && ebookRequestStatus !== 'available';
-  const shouldCheckAudiobookReadarr =
-    Boolean(audiobookReadarrBookId) && audiobookRequestStatus !== 'available';
-
-  const { data: ebookReadarrAvailability } = useQuery({
-    queryKey: ['readarr', 'availability', 'readarr', ebookReadarrBookId],
-    queryFn: () =>
-      readarrApi.getAvailabilityByReadarrId(ebookReadarrBookId as number, 'ebook'),
-    enabled: shouldCheckEbookReadarr,
-    refetchInterval: shouldCheckEbookReadarr ? 15000 : false,
-  });
-
-  const { data: audiobookReadarrAvailability } = useQuery({
-    queryKey: ['readarr', 'availability', 'readarr', audiobookReadarrBookId],
-    queryFn: () =>
-      readarrApi.getAvailabilityByReadarrId(audiobookReadarrBookId as number, 'audiobook'),
-    enabled: shouldCheckAudiobookReadarr,
-    refetchInterval: shouldCheckAudiobookReadarr ? 15000 : false,
-  });
 
   const { data: promptSummaries = [] } = useBookPrompts(
     hasHardcoverId ? (hardcoverId as number) : undefined,
@@ -99,6 +80,26 @@ export default function BookDetails() {
     },
     onError: (err: Error) => {
       toast.error('Failed to clear request', { description: err.message });
+    },
+  });
+
+  const clearAvailabilityMutation = useMutation({
+    mutationFn: async ({ bookId, formatType }: { bookId: number; formatType: 'ebook' | 'audiobook' }) => {
+      return booksApi.clearAvailability(bookId, formatType);
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['book', 'by-hardcover', hardcoverId] });
+      queryClient.invalidateQueries({ queryKey: ['requests', 'by-hardcover', hardcoverId] });
+      const formatName = variables.formatType === 'ebook' ? 'eBook' : 'Audiobook';
+      toast.success('Availability cleared', {
+        description: `${formatName} availability has been reset. You can now re-download this book.`,
+      });
+    },
+    onError: (err: Error, variables) => {
+      const formatName = variables.formatType === 'ebook' ? 'eBook' : 'Audiobook';
+      toast.error('Failed to clear availability', {
+        description: `Could not clear ${formatName} availability: ${err.message}`
+      });
     },
   });
 
@@ -171,16 +172,14 @@ export default function BookDetails() {
   };
 
   const ebookAvailable =
+    dbBook?.ebook_available ||
     book.ebookAvailable ||
     ebookRequestAvailable ||
-    readarrAvailability?.ebook ||
-    ebookReadarrAvailability?.available ||
     false;
   const audiobookAvailable =
+    dbBook?.audiobook_available ||
     book.audiobookAvailable ||
     audiobookRequestAvailable ||
-    readarrAvailability?.audiobook ||
-    audiobookReadarrAvailability?.available ||
     false;
   const ebookNotFound = ebookRequestStatus === 'not_found';
   const audiobookNotFound = audiobookRequestStatus === 'not_found';
@@ -191,6 +190,7 @@ export default function BookDetails() {
   const canRequestEbook = Boolean(user?.can_request_ebook) && !ebookAvailable;
   const canRequestAudiobook = Boolean(user?.can_request_audiobook) && !audiobookAvailable;
   const canRequestAnything = canRequestEbook || canRequestAudiobook;
+  const canDownload = Boolean(user?.can_download);
   const hasMissingFormat = !ebookAvailable || !audiobookAvailable;
   const preferredFormat =
     ebookAvailable && !audiobookAvailable
@@ -198,7 +198,7 @@ export default function BookDetails() {
       : audiobookAvailable && !ebookAvailable
         ? 'ebook'
         : undefined;
-  const hasAnyRequests = Boolean(ebookRequestStatus || audiobookRequestStatus);
+  const hasAnyRequests = ebookRequested || audiobookRequested;
 
   return (
     <>
@@ -310,15 +310,41 @@ export default function BookDetails() {
               {/* Availability Badges */}
               <div className="flex flex-wrap gap-2 pt-2">
                 {ebookAvailable && (
-                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/20 border border-emerald-500/30">
+                  <div className="group flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 relative">
                     <BookOpen className="h-4 w-4 text-emerald-400" />
                     <span className="text-sm font-medium text-emerald-400">eBook Available</span>
+                    {dbBook?.id && dbBook.ebook_available && (
+                      <button
+                        onClick={() => {
+                          if (window.confirm('Clear eBook availability? This will allow you to re-download this book.')) {
+                            clearAvailabilityMutation.mutate({ bookId: dbBook.id, formatType: 'ebook' });
+                          }
+                        }}
+                        className="ml-1 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:bg-emerald-500/30 rounded-full"
+                        title="Clear eBook availability"
+                      >
+                        <X className="h-3 w-3 text-emerald-400" />
+                      </button>
+                    )}
                   </div>
                 )}
                 {audiobookAvailable && (
-                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/20 border border-emerald-500/30">
+                  <div className="group flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 relative">
                     <BookOpen className="h-4 w-4 text-emerald-400" />
                     <span className="text-sm font-medium text-emerald-400">Audiobook Available</span>
+                    {dbBook?.id && dbBook.audiobook_available && (
+                      <button
+                        onClick={() => {
+                          if (window.confirm('Clear audiobook availability? This will allow you to re-download this book.')) {
+                            clearAvailabilityMutation.mutate({ bookId: dbBook.id, formatType: 'audiobook' });
+                          }
+                        }}
+                        className="ml-1 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:bg-emerald-500/30 rounded-full"
+                        title="Clear audiobook availability"
+                      >
+                        <X className="h-3 w-3 text-emerald-400" />
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -326,18 +352,34 @@ export default function BookDetails() {
               {/* Actions */}
               <div className="flex flex-wrap gap-3 pt-2">
                 {!hasAnyRequests && hasMissingFormat && canRequestAnything && (
-                  <Button
-                    size="lg"
-                    onClick={() => setRequestOpen(true)}
-                    className="bg-primary hover:bg-primary/90 glow-primary"
-                  >
-                    <Clock className="h-4 w-4 mr-2" />
-                    {preferredFormat === 'ebook'
-                      ? 'Request eBook'
-                      : preferredFormat === 'audiobook'
-                        ? 'Request Audiobook'
-                        : 'Request Book'}
-                  </Button>
+                  <>
+                    <Button
+                      size="lg"
+                      onClick={() => setRequestOpen(true)}
+                      className="bg-primary hover:bg-primary/90 glow-primary"
+                    >
+                      <Clock className="h-4 w-4 mr-2" />
+                      {preferredFormat === 'ebook'
+                        ? 'Request eBook'
+                        : preferredFormat === 'audiobook'
+                          ? 'Request Audiobook'
+                          : 'Request Book'}
+                    </Button>
+                    {canDownload && (
+                      <Button
+                        size="lg"
+                        variant="outline"
+                        onClick={() => {
+                          setSearchFormat(preferredFormat || 'ebook');
+                          setSearchOpen(true);
+                        }}
+                        className="border-border hover:bg-accent"
+                      >
+                        <Search className="h-4 w-4 mr-2" />
+                        Search Book
+                      </Button>
+                    )}
+                  </>
                 )}
                 {hasAnyRequests && !ebookAvailable && !audiobookAvailable && (
                   <div className="inline-flex items-center gap-2 rounded-full border border-primary/40 bg-primary/10 px-4 py-2 text-sm font-medium text-primary">
@@ -359,23 +401,6 @@ export default function BookDetails() {
                     >
                       <ExternalLink className="h-4 w-4 mr-2" />
                       View on Hardcover
-                    </a>
-                  </Button>
-                )}
-                {hasAnyRequests && readarrManageLink?.url && readarrManageLink?.readarr_book_id && (
-                  <Button
-                    size="lg"
-                    variant="outline"
-                    asChild
-                    className="border-border hover:bg-accent"
-                  >
-                    <a
-                      href={readarrManageLink.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      <ExternalLink className="h-4 w-4 mr-2" />
-                      Manage in Readarr
                     </a>
                   </Button>
                 )}
@@ -410,11 +435,9 @@ export default function BookDetails() {
                 const promptBooks = (prompt?.prompt_books || [])
                   .map((entry: any) => entry?.book ? transformHardcoverBook(entry.book) : null)
                   .filter((book): book is ReturnType<typeof transformHardcoverBook> => Boolean(book));
-                const promptKey = String(prompt?.id ?? prompt?.slug ?? index);
                 const defaultVisible = Math.min(10, promptBooks.length);
-                const currentLimit = promptViewCounts[promptKey] ?? defaultVisible;
-                const visibleBooks = promptBooks.slice(0, currentLimit);
-                const hasMore = promptBooks.length > currentLimit;
+                const visibleBooks = promptBooks.slice(0, defaultVisible);
+                const promptKey = String(prompt?.id ?? prompt?.slug ?? index);
 
                 return (
                   <div
@@ -422,7 +445,7 @@ export default function BookDetails() {
                     className="rounded-2xl border border-border bg-card/80 p-5"
                   >
                     <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                      <div className="space-y-2">
+                      <div className="space-y-2 flex-1">
                         <p className="text-xs text-muted-foreground uppercase tracking-wide">
                           Hardcover Prompt
                         </p>
@@ -446,35 +469,18 @@ export default function BookDetails() {
                           )}
                         </div>
                       </div>
-                      <div className="text-xs text-muted-foreground">
-                        {hasMore ? 'Scroll to load more' : 'All books loaded'}
-                      </div>
+                      {prompt?.slug && promptBooks.length > defaultVisible && (
+                        <Link to={`/prompt/${prompt.slug}`}>
+                          <Button variant="outline" size="sm" className="whitespace-nowrap">
+                            {prompt.books_count && prompt.books_count > promptBooks.length
+                              ? `View More (${prompt.books_count} total)`
+                              : `View All ${promptBooks.length} Books`}
+                          </Button>
+                        </Link>
+                      )}
                     </div>
                     {visibleBooks.length > 0 && (
-                      <div
-                        className="mt-4 flex gap-4 overflow-x-auto pb-4 scrollbar-hide -mx-2 px-2"
-                        onScroll={(event) => {
-                          if (!hasMore) return;
-                          const container = event.currentTarget;
-                          const threshold = 120;
-                          const reachedEnd =
-                            container.scrollLeft + container.clientWidth >=
-                            container.scrollWidth - threshold;
-                          if (!reachedEnd) return;
-                          if (promptScrollLocks.current[promptKey]) return;
-                          promptScrollLocks.current[promptKey] = true;
-                          setPromptViewCounts((prev) => ({
-                            ...prev,
-                            [promptKey]: Math.min(
-                              (prev[promptKey] ?? defaultVisible) + 10,
-                              promptBooks.length
-                            ),
-                          }));
-                          window.setTimeout(() => {
-                            promptScrollLocks.current[promptKey] = false;
-                          }, 200);
-                        }}
-                      >
+                      <div className="mt-4 flex gap-4 overflow-x-auto pb-4 scrollbar-hide -mx-2 px-2">
                         {visibleBooks.map((promptBook) => (
                           <div
                             key={promptBook.id}
@@ -503,6 +509,29 @@ export default function BookDetails() {
             audiobook: audiobookAvailable,
           }}
         />
+
+        {searchOpen && (
+          <SearchReleaseDialog
+            book={{
+              id: dbBook?.id ?? requestStatus?.book_id ?? undefined,
+              hardcoverId: hardcoverId,
+              title: book.title,
+              author: book.author,
+              isbn: book.isbn,
+              description: book.description,
+              cover: book.cover,
+              publishedDate: book.publishedDate,
+              rating: book.rating,
+              pageCount: book.pageCount,
+              series: book.series,
+              seriesPosition: book.seriesPosition,
+              genres: book.genres,
+            }}
+            open={searchOpen}
+            onOpenChange={setSearchOpen}
+            formatType={searchFormat}
+          />
+        )}
     </>
   );
 }
