@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Download, RefreshCw, Clock, CheckCircle, XCircle, Pause, PlayCircle, FolderInput, Trash2 } from 'lucide-react';
+import { Download, Clock, CheckCircle, XCircle, Pause, PlayCircle, FolderInput, Trash2, AlertCircle, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -61,7 +61,7 @@ function getStateIcon(state: string) {
       return <CheckCircle className="h-4 w-4" />;
     case 'downloading':
     case 'checking':
-      return <RefreshCw className="h-4 w-4 animate-spin" />;
+      return <Loader2 className="h-4 w-4 animate-spin" />;
     case 'queued':
       return <Clock className="h-4 w-4" />;
     case 'error':
@@ -151,7 +151,7 @@ function getImportStatusIcon(status?: string) {
     case 'imported':
       return <CheckCircle className="h-4 w-4" />;
     case 'importing':
-      return <RefreshCw className="h-4 w-4 animate-spin" />;
+      return <Loader2 className="h-4 w-4 animate-spin" />;
     case 'failed':
       return <XCircle className="h-4 w-4" />;
     case 'pending':
@@ -427,20 +427,12 @@ export default function Downloads() {
           Failed
         </Button>
         <Button
-          variant="outline"
-          size="sm"
-          onClick={() => refetch()}
-          className="ml-auto"
-        >
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Refresh
-        </Button>
-        <Button
           variant="destructive"
           size="sm"
           onClick={() => clearAllMutation.mutate()}
           disabled={clearAllMutation.isPending || tasks.length === 0}
           title={filterState ? `Clear all ${filterState} tasks` : 'Clear imported/failed tasks from history'}
+          className="ml-auto"
         >
           <Trash2 className="h-4 w-4 mr-2" />
           {filterState ? `Clear ${filterState}` : 'Clear History'}

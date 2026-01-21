@@ -322,8 +322,10 @@ class DownloadOrchestrator:
                 # Cleanup
                 handler.cleanup(task, success=True)
 
-                # Update book availability
-                self._update_book_availability(task, db)
+                # Only update book availability if import succeeded (dest_path is not None)
+                # This ensures books are only marked as available after successful import
+                if dest_path:
+                    self._update_book_availability(task, db)
 
                 logger.info(
                     "orchestrator_download_complete",
