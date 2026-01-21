@@ -391,6 +391,7 @@ export default function Series() {
                               <>
                                 {expandedAvailableCount > 0 && (
                                   <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20">
+                                    <CheckCircle className="h-3.5 w-3.5 text-emerald-300" />
                                     <span className="text-xs font-medium text-emerald-300">
                                       {expandedAvailableCount}/{expandedCount} expanded
                                     </span>
