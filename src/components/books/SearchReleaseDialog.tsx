@@ -603,17 +603,17 @@ export function SearchReleaseDialog({
 
             {!dbBook?.ebook_available && (
               <TabsContent value="ebook" className="mt-4">
-                <ScrollArea className="max-h-[60vh] pr-4">
+                <div className="max-h-[60vh] overflow-y-auto pr-2">
                   {renderReleaseResults('ebook', ebookSearchResults, isSearchingEbooks, ebookSearchError)}
-                </ScrollArea>
+                </div>
               </TabsContent>
             )}
 
             {!dbBook?.audiobook_available && (
               <TabsContent value="audiobook" className="mt-4">
-                <ScrollArea className="max-h-[60vh] pr-4">
+                <div className="max-h-[60vh] overflow-y-auto pr-2">
                   {renderReleaseResults('audiobook', audiobookSearchResults, isSearchingAudiobooks, audiobookSearchError)}
-                </ScrollArea>
+                </div>
               </TabsContent>
             )}
           </Tabs>
