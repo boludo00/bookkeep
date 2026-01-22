@@ -12,7 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Download, Search, HardDrive, Wifi, BookOpen, Headphones, CheckCircle, RefreshCw, XCircle } from 'lucide-react';
+import { Download, Search, HardDrive, Wifi, BookOpen, Headphones, CheckCircle, RefreshCw, XCircle, ExternalLink } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { downloadsApi, ReleaseInfo, booksApi } from '@/lib/api';
 import { toast } from 'sonner';
@@ -437,6 +437,18 @@ export function SearchReleaseDialog({
                   <Badge variant="outline" className="text-muted-foreground">
                     Score: {release.quality_score.toFixed(1)}
                   </Badge>
+                  {release.info_url && (
+                    <a
+                      href={release.info_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                      <span className="text-xs">View</span>
+                    </a>
+                  )}
                 </div>
               </div>
 
