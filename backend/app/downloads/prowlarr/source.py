@@ -214,6 +214,7 @@ class ProwlarrSource(ReleaseSource):
                 "category_ids": category_ids,
             },
             publish_date=parsed.get("publish_date"),
+            info_url=parsed.get("info_url"),
         )
 
         return release

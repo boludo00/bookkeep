@@ -831,6 +831,7 @@ export interface ReleaseInfo {
   quality_score: number;
   published_date: string | null;
   already_downloaded: boolean;
+  info_url: string | null;
 }
 
 export interface SearchResponse {
