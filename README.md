@@ -116,17 +116,27 @@ Required environment variables:
 
 Optional:
 - `REDIS_URL`
-- `READARR_URL`
-- `READARR_API_KEY`
+- `BOOKKEEP_SECRET_KEY` - JWT secret key for token signing (see Authentication below)
+- `BOOKKEEP_ACCESS_TOKEN_EXPIRE_MINUTES` - Access token expiration (default: 30)
+- `BOOKKEEP_REFRESH_TOKEN_EXPIRE_DAYS` - Refresh token expiration (default: 7)
 
-## Readarr Integration
+## Authentication
 
-Bookkeep is a request tool: users request books (ebook/audiobook) in the UI, and those requests are sent to Readarr for fulfillment. Configure Readarr in Settings and ensure the backend can reach your Readarr instance.
+Bookkeep uses JWT (JSON Web Tokens) for authentication. Users log in with username/password and receive an access token and refresh token.
 
-Recommended flow:
-- Set `HARDCOVER_API_TOKEN` and start Bookkeep.
-- In Bookkeep settings, add your Readarr server (URL + API key).
-- Users request books; Bookkeep forwards those requests to Readarr.
+- **Access tokens** are short-lived (default 30 minutes) and used for API requests
+- **Refresh tokens** are longer-lived (default 7 days) and used to obtain new access tokens
+
+### Secret Key
+
+Set `BOOKKEEP_SECRET_KEY` to a secure random string for production deployments. This key is used to sign JWT tokens.
+
+```sh
+# Generate a secure key
+openssl rand -base64 32
+```
+
+If not set, a random key is generated at startup. This means **all users will be logged out when the server restarts**. For persistent sessions across restarts, always set this variable.
 
 ## Jobs & Scheduling
 
