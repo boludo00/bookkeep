@@ -7,6 +7,7 @@ Create Date: 2026-01-18
 """
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 
 # revision identifiers, used by Alembic.
@@ -16,9 +17,25 @@ branch_labels = None
 depends_on = None
 
 
+def table_exists(table_name: str) -> bool:
+    """Check if a table exists."""
+    bind = op.get_bind()
+    inspector = inspect(bind)
+    return table_name in inspector.get_table_names()
+
+
+def index_exists(table_name: str, index_name: str) -> bool:
+    """Check if an index exists on the table."""
+    bind = op.get_bind()
+    inspector = inspect(bind)
+    indexes = [idx["name"] for idx in inspector.get_indexes(table_name)]
+    return index_name in indexes
+
+
 def upgrade():
     # Create download_clients table
-    op.create_table(
+    if not table_exists('download_clients'):
+        op.create_table(
         'download_clients',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('name', sa.String(), nullable=False),
@@ -35,12 +52,14 @@ def upgrade():
         sa.Column('path_mappings_json', sa.Text(), nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
         sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
-        sa.PrimaryKeyConstraint('id')
-    )
-    op.create_index('ix_download_clients_name', 'download_clients', ['name'], unique=True)
+            sa.PrimaryKeyConstraint('id')
+        )
+    if not index_exists('download_clients', 'ix_download_clients_name'):
+        op.create_index('ix_download_clients_name', 'download_clients', ['name'], unique=True)
 
     # Create download_tasks table
-    op.create_table(
+    if not table_exists('download_tasks'):
+        op.create_table(
         'download_tasks',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('book_id', sa.Integer(), nullable=False),
@@ -70,16 +89,23 @@ def upgrade():
         sa.Column('started_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
-        sa.ForeignKeyConstraint(['book_id'], ['books.id'], ),
-        sa.PrimaryKeyConstraint('id')
-    )
-    op.create_index('ix_download_tasks_book_id', 'download_tasks', ['book_id'])
-    op.create_index('ix_download_tasks_state', 'download_tasks', ['state'])
+            sa.ForeignKeyConstraint(['book_id'], ['books.id'], ),
+            sa.PrimaryKeyConstraint('id')
+        )
+    if not index_exists('download_tasks', 'ix_download_tasks_book_id'):
+        op.create_index('ix_download_tasks_book_id', 'download_tasks', ['book_id'])
+    if not index_exists('download_tasks', 'ix_download_tasks_state'):
+        op.create_index('ix_download_tasks_state', 'download_tasks', ['state'])
 
 
 def downgrade():
-    op.drop_index('ix_download_tasks_state', table_name='download_tasks')
-    op.drop_index('ix_download_tasks_book_id', table_name='download_tasks')
-    op.drop_table('download_tasks')
-    op.drop_index('ix_download_clients_name', table_name='download_clients')
-    op.drop_table('download_clients')
+    if table_exists('download_tasks'):
+        if index_exists('download_tasks', 'ix_download_tasks_state'):
+            op.drop_index('ix_download_tasks_state', table_name='download_tasks')
+        if index_exists('download_tasks', 'ix_download_tasks_book_id'):
+            op.drop_index('ix_download_tasks_book_id', table_name='download_tasks')
+        op.drop_table('download_tasks')
+    if table_exists('download_clients'):
+        if index_exists('download_clients', 'ix_download_clients_name'):
+            op.drop_index('ix_download_clients_name', table_name='download_clients')
+        op.drop_table('download_clients')

@@ -60,6 +60,9 @@ class Release:
     # Publishing info
     publish_date: Optional[datetime] = None
 
+    # Link to indexer page with more info
+    info_url: Optional[str] = None
+
 
 @dataclass
 class DownloadStatus:

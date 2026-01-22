@@ -98,6 +98,7 @@ class ReleaseInfo(BaseModel):
     quality_score: float
     published_date: Optional[str] = None
     already_downloaded: bool = False  # Flag if this release was already downloaded
+    info_url: Optional[str] = None  # Link to indexer page with more info
 
 
 class SearchResponse(BaseModel):
@@ -197,7 +198,8 @@ async def search_releases(
                 language=r.language,
                 quality_score=r.quality_score,
                 published_date=r.publish_date.isoformat() if r.publish_date else None,
-                already_downloaded=already_downloaded
+                already_downloaded=already_downloaded,
+                info_url=r.info_url
             ))
 
         logger.info(

@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import type { Book } from '@/types/book';
 
 interface SearchGroupedResults {
@@ -44,7 +45,8 @@ export function SearchResults({ results, query, isLoading, isFetched }: SearchRe
   }
 
   return (
-    <div className="absolute top-full left-0 right-0 mt-2 rounded-lg bg-popover border border-border shadow-xl overflow-hidden max-h-[70vh] overflow-y-auto z-50 overscroll-contain">
+    <div className="absolute top-full left-0 right-0 mt-2 rounded-lg bg-popover border border-border shadow-xl z-50">
+      <ScrollArea className="max-h-[60vh]">
       {results.series.length > 0 && (
         <div className="border-b border-border/60">
           <div className="px-3 pt-3 pb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -117,6 +119,7 @@ export function SearchResults({ results, query, isLoading, isFetched }: SearchRe
           ))}
         </div>
       )}
+      </ScrollArea>
     </div>
   );
 }
