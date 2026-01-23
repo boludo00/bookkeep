@@ -193,12 +193,16 @@ class TorrentHandler(DownloadHandler):
                     info_hash = client.add_torrent(url=task.download_url, category=category, tags=[unique_tag])
 
                 if not info_hash:
-                    logger.error("torrent_add_failed", task_id=task.id)
+                    logger.error(
+                        "torrent_add_failed",
+                        task_id=task.id,
+                        url=task.download_url[:100] if task.download_url else None
+                    )
                     if status_callback:
                         status_callback(DownloadStatus(
                             state=DownloadState.ERROR,
                             progress=0.0,
-                            message="Failed to add torrent"
+                            message="Failed to add torrent - could not determine torrent hash. The torrent may have been added but cannot be tracked."
                         ))
                     return None
 

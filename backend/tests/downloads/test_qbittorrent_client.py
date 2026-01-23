@@ -195,11 +195,14 @@ class TestAddTorrent:
 
     def test_add_torrent_by_url(self, mock_qb_client):
         mock_qb_client.client.torrents_add.return_value = "Ok."
+        # Must return torrent when queried by tag
         mock_qb_client.client.torrents_info.return_value = [Mock(hash="abc123")]
         mock_qb_client.client.torrents_categories.return_value = {"books": {}}
 
+        # Use tags for reliable hash lookup
         info_hash = mock_qb_client.add_torrent(
-            url="http://example.com/book.torrent"
+            url="http://example.com/book.torrent",
+            tags=["bookkeep-test"]
         )
 
         assert info_hash == "abc123"
@@ -207,13 +210,16 @@ class TestAddTorrent:
 
     def test_add_torrent_by_magnet(self, mock_qb_client):
         magnet = "magnet:?xt=urn:btih:ABCDEF1234567890ABCDEF1234567890ABCDEF12&dn=Book"
+        expected_hash = "abcdef1234567890abcdef1234567890abcdef12"
 
         mock_qb_client.client.torrents_add.return_value = "Ok."
+        # Mock that the torrent is found when verifying by hash
+        mock_qb_client.client.torrents_info.return_value = [Mock(hash=expected_hash)]
 
         info_hash = mock_qb_client.add_torrent(magnet=magnet)
 
-        # Should extract hash from magnet link
-        assert info_hash == "abcdef1234567890abcdef1234567890abcdef12"
+        # Should extract hash from magnet link and verify it exists
+        assert info_hash == expected_hash
 
     def test_add_torrent_by_file(self, mock_qb_client):
         torrent_bytes = b"torrent file content"
@@ -222,7 +228,11 @@ class TestAddTorrent:
         mock_qb_client.client.torrents_info.return_value = [Mock(hash="file123")]
         mock_qb_client.client.torrents_categories.return_value = {}
 
-        info_hash = mock_qb_client.add_torrent(torrent_file=torrent_bytes)
+        # Use tags for reliable hash lookup
+        info_hash = mock_qb_client.add_torrent(
+            torrent_file=torrent_bytes,
+            tags=["bookkeep-test"]
+        )
 
         assert info_hash == "file123"
         mock_qb_client.client.torrents_add.assert_called_once()
@@ -275,11 +285,13 @@ class TestAddTorrent:
         mock_qb_client.client.torrents_info.return_value = [Mock(hash="exists123")]
         mock_qb_client.client.torrents_categories.return_value = {}
 
+        # Use tags for reliable hash lookup even when torrent exists
         info_hash = mock_qb_client.add_torrent(
-            url="http://example.com/book.torrent"
+            url="http://example.com/book.torrent",
+            tags=["bookkeep-test"]
         )
 
-        # Should still return the hash
+        # Should still return the hash via tag lookup
         assert info_hash == "exists123"
 
     def test_add_torrent_no_source_provided(self, mock_qb_client):
@@ -293,6 +305,25 @@ class TestAddTorrent:
             url="http://example.com/book.torrent"
         )
 
+        assert info_hash is None
+
+    def test_add_torrent_hash_lookup_fails_returns_none(self, mock_qb_client):
+        """
+        Test that when hash lookup fails, we return None instead of falling back
+        to potentially wrong torrents (race condition fix).
+        """
+        mock_qb_client.client.torrents_add.return_value = "Ok."
+        # Simulate the torrent not being found by tag (e.g., API delay)
+        mock_qb_client.client.torrents_info.return_value = []
+        mock_qb_client.client.torrents_categories.return_value = {}
+
+        # Even with tags, if lookup fails, should return None (not a random torrent)
+        info_hash = mock_qb_client.add_torrent(
+            url="http://example.com/book.torrent",
+            tags=["bookkeep-123"]
+        )
+
+        # Should return None, NOT fall back to "most recent" torrent
         assert info_hash is None
 
 
@@ -656,26 +687,52 @@ class TestEdgeCases:
     """Test edge cases and error handling"""
 
     def test_magnet_link_with_additional_params(self, mock_qb_client):
-        magnet = "magnet:?xt=urn:btih:ABCDEF1234567890ABCDEF1234567890ABCDEF12&dn=Book&tr=http://tracker.example.com"
+        expected_hash = "abcdef1234567890abcdef1234567890abcdef12"
+        magnet = f"magnet:?xt=urn:btih:ABCDEF1234567890ABCDEF1234567890ABCDEF12&dn=Book&tr=http://tracker.example.com"
 
         mock_qb_client.client.torrents_add.return_value = "Ok."
+        # Mock that the torrent is found when verifying by hash
+        mock_qb_client.client.torrents_info.return_value = [Mock(hash=expected_hash)]
 
         info_hash = mock_qb_client.add_torrent(magnet=magnet)
 
-        assert info_hash == "abcdef1234567890abcdef1234567890abcdef12"
+        assert info_hash == expected_hash
 
     def test_magnet_link_short_hash(self, mock_qb_client):
+        """
+        Test that invalid/short magnet hashes require tag-based lookup.
+        We no longer fall back to category/most-recent which caused race conditions.
+        """
         # Hash too short (not 40 chars)
         magnet = "magnet:?xt=urn:btih:ABC123&dn=Book"
 
         mock_qb_client.client.torrents_add.return_value = "Ok."
-        mock_qb_client.client.torrents_info.return_value = [Mock(hash="fallback123")]
+        mock_qb_client.client.torrents_info.return_value = [Mock(hash="tagged123")]
         mock_qb_client.client.torrents_categories.return_value = {}
 
+        # With tags, should find it via tag lookup
+        info_hash = mock_qb_client.add_torrent(magnet=magnet, tags=["bookkeep-test"])
+
+        # Should find via tag lookup (not unsafe fallback)
+        assert info_hash == "tagged123"
+
+    def test_magnet_link_short_hash_no_tags_fails(self, mock_qb_client):
+        """
+        Test that invalid/short magnet hashes WITHOUT tags return None.
+        This prevents the race condition where wrong torrents were tracked.
+        """
+        # Hash too short (not 40 chars)
+        magnet = "magnet:?xt=urn:btih:ABC123&dn=Book"
+
+        mock_qb_client.client.torrents_add.return_value = "Ok."
+        # Even if there are torrents in the client, without tags we can't identify ours
+        mock_qb_client.client.torrents_info.return_value = []
+        mock_qb_client.client.torrents_categories.return_value = {}
+
+        # Without tags and invalid hash, should return None (not unsafe fallback)
         info_hash = mock_qb_client.add_torrent(magnet=magnet)
 
-        # Should fallback to finding torrent
-        assert info_hash == "fallback123"
+        assert info_hash is None
 
     def test_get_status_files_error(self, mock_qb_client, mock_torrent):
         mock_qb_client.client.torrents_info.return_value = [mock_torrent]
