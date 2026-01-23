@@ -166,6 +166,7 @@ class HardcoverCachedContributor(BaseModel):
     contribution: Optional[str] = None
 
 class HardcoverContribution(BaseModel):
+    contribution: Optional[str] = None
     author: HardcoverAuthor
 
 class HardcoverSeries(BaseModel):

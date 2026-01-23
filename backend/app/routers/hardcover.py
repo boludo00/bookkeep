@@ -269,13 +269,28 @@ def _save_book_to_db(book_data: dict, db: Session) -> Optional[Book]:
         authors = []
         author_id = None
         if book_data.get("contributions"):
-            authors = [c["author"]["name"] for c in book_data["contributions"] if c.get("author", {}).get("name")]
+            contributions = book_data["contributions"]
+            if len(contributions) == 1:
+                # Single contributor - use them regardless of role
+                if contributions[0].get("author", {}).get("name"):
+                    authors = [contributions[0]["author"]["name"]]
+            else:
+                # Multiple contributors - filter to only "Author" role (or null)
+                author_contributions = [
+                    c for c in contributions
+                    if c.get("author", {}).get("name") and (not c.get("contribution") or c.get("contribution") == "Author")
+                ]
+                if author_contributions:
+                    authors = [c["author"]["name"] for c in author_contributions]
+                else:
+                    # Fallback to all if no "Author" found
+                    authors = [c["author"]["name"] for c in contributions if c.get("author", {}).get("name")]
             # Extract first author's ID from contributions
-            if book_data["contributions"] and book_data["contributions"][0].get("author", {}).get("id"):
-                author_id = book_data["contributions"][0]["author"]["id"]
+            if contributions and contributions[0].get("author", {}).get("id"):
+                author_id = contributions[0]["author"]["id"]
         elif book_data.get("cached_contributors"):
             authors = [c.get("author", {}).get("name") or c.get("name", "") for c in book_data["cached_contributors"]]
-        
+
         author = ", ".join(authors) if authors else "Unknown Author"
         
         # Extract cover URL
@@ -345,15 +360,30 @@ def _save_book_to_db(book_data: dict, db: Session) -> Optional[Book]:
     authors = []
     author_id = None
     if book_data.get("contributions"):
-        authors = [c["author"]["name"] for c in book_data["contributions"] if c.get("author", {}).get("name")]
+        contributions = book_data["contributions"]
+        if len(contributions) == 1:
+            # Single contributor - use them regardless of role
+            if contributions[0].get("author", {}).get("name"):
+                authors = [contributions[0]["author"]["name"]]
+        else:
+            # Multiple contributors - filter to only "Author" role (or null)
+            author_contributions = [
+                c for c in contributions
+                if c.get("author", {}).get("name") and (not c.get("contribution") or c.get("contribution") == "Author")
+            ]
+            if author_contributions:
+                authors = [c["author"]["name"] for c in author_contributions]
+            else:
+                # Fallback to all if no "Author" found
+                authors = [c["author"]["name"] for c in contributions if c.get("author", {}).get("name")]
         # Extract first author's ID from contributions
-        if book_data["contributions"] and book_data["contributions"][0].get("author", {}).get("id"):
-            author_id = book_data["contributions"][0]["author"]["id"]
+        if contributions and contributions[0].get("author", {}).get("id"):
+            author_id = contributions[0]["author"]["id"]
     elif book_data.get("cached_contributors"):
         authors = [c.get("author", {}).get("name") or c.get("name", "") for c in book_data["cached_contributors"]]
-    
+
     author = ", ".join(authors) if authors else "Unknown Author"
-    
+
     # Extract cover URL
     cover_url = None
     if isinstance(book_data.get("cached_image"), dict):
@@ -1443,6 +1473,7 @@ async def get_book_details(
               }
             }
             contributions {
+              contribution
               author {
                 id
                 name
