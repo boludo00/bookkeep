@@ -193,22 +193,33 @@ class TorrentHandler(DownloadHandler):
                     info_hash = client.add_torrent(url=task.download_url, category=category, tags=[unique_tag])
 
                 if not info_hash:
-                    logger.error("torrent_add_failed", task_id=task.id)
+                    logger.error(
+                        "torrent_add_failed",
+                        task_id=task.id,
+                        url=task.download_url[:100] if task.download_url else None
+                    )
                     if status_callback:
                         status_callback(DownloadStatus(
                             state=DownloadState.ERROR,
                             progress=0.0,
-                            message="Failed to add torrent"
+                            message="Failed to add torrent - could not determine torrent hash. The torrent may have been added but cannot be tracked."
                         ))
                     return None
 
-                # Check if this info_hash is already assigned to a different task
+                # Check if this info_hash is already assigned to an ACTIVE task
+                # We only block if another task is actively downloading/queued
+                # Allow re-downloading if previous task failed/errored
                 db = self.db_session or SessionLocal()
                 try:
                     from ...models import DownloadTask as DownloadTaskModel
+
+                    # States that indicate the task is actively in progress
+                    active_states = ['queued', 'downloading', 'seeding', 'checking', 'paused']
+
                     existing_task = db.query(DownloadTaskModel).filter(
                         DownloadTaskModel.client_download_id == info_hash,
-                        DownloadTaskModel.id != task.id
+                        DownloadTaskModel.id != task.id,
+                        DownloadTaskModel.state.in_(active_states)
                     ).first()
 
                     if existing_task:
@@ -217,13 +228,14 @@ class TorrentHandler(DownloadHandler):
                             task_id=task.id,
                             info_hash=info_hash,
                             existing_task_id=existing_task.id,
+                            existing_task_state=existing_task.state,
                             existing_book_id=existing_task.book_id
                         )
                         if status_callback:
                             status_callback(DownloadStatus(
                                 state=DownloadState.ERROR,
                                 progress=0.0,
-                                message=f"This release is already being downloaded for another book (task {existing_task.id})"
+                                message=f"This release is already being downloaded for another book (task {existing_task.id}, state: {existing_task.state})"
                             ))
                         # Remove the duplicate torrent we just added
                         try:

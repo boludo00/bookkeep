@@ -234,6 +234,43 @@ class QBittorrentClient:
         except Exception as e:
             logger.warning("qbittorrent_category_error", error=str(e))
 
+    def _extract_hash_from_magnet(self, magnet: str) -> Optional[str]:
+        """
+        Extract info_hash from a magnet link.
+
+        Format: magnet:?xt=urn:btih:HASH&...
+
+        Returns:
+            40-character lowercase SHA-1 hash, or None if extraction fails
+        """
+        if not magnet or "btih:" not in magnet.lower():
+            return None
+
+        try:
+            hash_start = magnet.lower().find("btih:") + 5
+            hash_end = magnet.find("&", hash_start)
+            if hash_end == -1:
+                info_hash = magnet[hash_start:]
+            else:
+                info_hash = magnet[hash_start:hash_end]
+
+            # Handle base32 encoded hashes (32 chars) - convert to hex
+            if len(info_hash) == 32:
+                import base64
+                try:
+                    decoded = base64.b32decode(info_hash.upper())
+                    info_hash = decoded.hex()
+                except Exception:
+                    pass
+
+            # Validate hash (40 chars for SHA-1 hex)
+            if len(info_hash) == 40:
+                return info_hash.lower()
+        except Exception as e:
+            logger.warning("qbittorrent_magnet_hash_extraction_failed", error=str(e))
+
+        return None
+
     def _get_torrent_hash(
         self,
         url: Optional[str] = None,
@@ -245,61 +282,82 @@ class QBittorrentClient:
         """
         Get torrent hash after adding.
 
-        Tries to find the torrent by various methods, preferring tag-based lookup.
+        Priority order:
+        1. Extract hash from magnet link (most reliable for magnets)
+        2. Tag-based lookup with retries (reliable for all types)
+
+        NOTE: We deliberately DO NOT fall back to category or "most recent" lookups
+        as those cause race conditions where the wrong torrent can be returned.
         """
-        # If tags provided, look for torrent with matching tag (most reliable method)
+        # Priority 1: Extract hash from magnet link (this is deterministic and reliable)
+        if magnet:
+            extracted_hash = self._extract_hash_from_magnet(magnet)
+            if extracted_hash:
+                # Verify the torrent exists in qBittorrent with this hash
+                try:
+                    torrents = self.client.torrents_info(torrent_hashes=extracted_hash)
+                    if torrents:
+                        logger.info("qbittorrent_found_by_magnet_hash", hash=extracted_hash)
+                        return extracted_hash
+                    else:
+                        # Torrent not yet indexed, wait and retry
+                        logger.debug("qbittorrent_magnet_hash_not_found_yet", hash=extracted_hash)
+                except Exception as e:
+                    logger.warning("qbittorrent_magnet_hash_verify_failed", error=str(e))
+
+        # Priority 2: Tag-based lookup with retries (most reliable for URLs and files)
         if tags:
-            try:
-                # Wait a moment for torrent to be fully added
-                import time
-                time.sleep(1.0)
+            max_retries = 10
+            retry_delay = 0.5  # Start with 0.5 seconds
 
-                # Try each tag
-                for tag in tags:
-                    torrents = self.client.torrents_info(tag=tag)
-                    if torrents and len(torrents) > 0:
-                        logger.info("qbittorrent_found_by_tag", tag=tag, hash=torrents[0].hash)
-                        return torrents[0].hash
-            except Exception as e:
-                logger.warning("qbittorrent_tag_lookup_failed", error=str(e))
+            for attempt in range(max_retries):
+                try:
+                    for tag in tags:
+                        torrents = self.client.torrents_info(tag=tag)
+                        if torrents and len(torrents) > 0:
+                            logger.info(
+                                "qbittorrent_found_by_tag",
+                                tag=tag,
+                                hash=torrents[0].hash,
+                                attempt=attempt + 1
+                            )
+                            return torrents[0].hash
 
-        # If magnet link, extract hash from it
-        if magnet and "btih:" in magnet.lower():
-            # Extract hash from magnet link
-            # Format: magnet:?xt=urn:btih:HASH&...
-            try:
-                hash_start = magnet.lower().find("btih:") + 5
-                hash_end = magnet.find("&", hash_start)
-                if hash_end == -1:
-                    info_hash = magnet[hash_start:]
-                else:
-                    info_hash = magnet[hash_start:hash_end]
+                    # If we extracted a hash from magnet, check if it's available now
+                    if magnet:
+                        extracted_hash = self._extract_hash_from_magnet(magnet)
+                        if extracted_hash:
+                            torrents = self.client.torrents_info(torrent_hashes=extracted_hash)
+                            if torrents:
+                                logger.info(
+                                    "qbittorrent_found_by_magnet_hash_retry",
+                                    hash=extracted_hash,
+                                    attempt=attempt + 1
+                                )
+                                return extracted_hash
 
-                # Validate hash (40 chars for SHA-1)
-                if len(info_hash) == 40:
-                    return info_hash.lower()
-            except Exception:
-                pass
+                except Exception as e:
+                    logger.warning(
+                        "qbittorrent_tag_lookup_failed",
+                        error=str(e),
+                        attempt=attempt + 1
+                    )
 
-        # Try to find by category (most recent)
-        # NOTE: This can cause race conditions with concurrent downloads!
-        if category:
-            try:
-                torrents = self.client.torrents_info(category=category, sort='added_on', reverse=True)
-                if torrents:
-                    logger.warning("qbittorrent_fallback_to_recent", category=category)
-                    return torrents[0].hash
-            except Exception:
-                pass
+                # Wait before retry (exponential backoff capped at 2 seconds)
+                if attempt < max_retries - 1:
+                    time.sleep(min(retry_delay, 2.0))
+                    retry_delay *= 1.5
 
-        # Final fallback: get most recently added torrent
-        try:
-            torrents = self.client.torrents_info(sort='added_on', reverse=True)
-            if torrents:
-                logger.warning("qbittorrent_fallback_to_most_recent")
-                return torrents[0].hash
-        except Exception:
-            pass
+            logger.error(
+                "qbittorrent_hash_lookup_exhausted",
+                tags=tags,
+                has_magnet=bool(magnet),
+                max_retries=max_retries
+            )
+
+        # DO NOT use category-based or "most recent" fallbacks!
+        # These cause race conditions where we track the wrong torrent.
+        # It's better to fail and let the user retry than to track wrong content.
 
         return None
 
