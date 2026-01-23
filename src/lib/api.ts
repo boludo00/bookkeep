@@ -540,6 +540,23 @@ export const settingsApi = {
       method: 'PUT',
       body: JSON.stringify(paths),
     }),
+
+  // Cache management (admin only)
+  getCacheResources: () =>
+    apiRequest<{ resources: Array<{ key: string; name: string; description: string }> }>('/api/settings/cache/resources'),
+
+  clearCacheResource: (resource: string) =>
+    apiRequest<{ message: string; deleted_count: number }>(`/api/settings/cache/clear/${resource}`, {
+      method: 'POST',
+    }),
+
+  clearAllCache: () =>
+    apiRequest<{ message: string; total_deleted: number; by_resource: Record<string, number> }>('/api/settings/cache/clear-all', {
+      method: 'POST',
+    }),
+
+  debugCacheKeys: () =>
+    apiRequest<{ total_keys: number; sample_keys: string[]; namespace: string }>('/api/settings/cache/debug'),
 };
 
 // Readarr API endpoints
