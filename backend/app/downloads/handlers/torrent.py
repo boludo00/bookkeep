@@ -206,13 +206,20 @@ class TorrentHandler(DownloadHandler):
                         ))
                     return None
 
-                # Check if this info_hash is already assigned to a different task
+                # Check if this info_hash is already assigned to an ACTIVE task
+                # We only block if another task is actively downloading/queued
+                # Allow re-downloading if previous task failed/errored
                 db = self.db_session or SessionLocal()
                 try:
                     from ...models import DownloadTask as DownloadTaskModel
+
+                    # States that indicate the task is actively in progress
+                    active_states = ['queued', 'downloading', 'seeding', 'checking', 'paused']
+
                     existing_task = db.query(DownloadTaskModel).filter(
                         DownloadTaskModel.client_download_id == info_hash,
-                        DownloadTaskModel.id != task.id
+                        DownloadTaskModel.id != task.id,
+                        DownloadTaskModel.state.in_(active_states)
                     ).first()
 
                     if existing_task:
@@ -221,13 +228,14 @@ class TorrentHandler(DownloadHandler):
                             task_id=task.id,
                             info_hash=info_hash,
                             existing_task_id=existing_task.id,
+                            existing_task_state=existing_task.state,
                             existing_book_id=existing_task.book_id
                         )
                         if status_callback:
                             status_callback(DownloadStatus(
                                 state=DownloadState.ERROR,
                                 progress=0.0,
-                                message=f"This release is already being downloaded for another book (task {existing_task.id})"
+                                message=f"This release is already being downloaded for another book (task {existing_task.id}, state: {existing_task.state})"
                             ))
                         # Remove the duplicate torrent we just added
                         try:
