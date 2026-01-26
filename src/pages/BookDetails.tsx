@@ -136,7 +136,7 @@ export default function BookDetails() {
         <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-muted/30 mb-6">
           <BookOpen className="h-10 w-10 text-muted-foreground/50" />
         </div>
-        <h1 className="text-2xl font-bold text-foreground mb-3 font-serif">Book Not Found</h1>
+        <h1 className="text-2xl font-bold text-foreground mb-3">Book Not Found</h1>
         <p className="text-muted-foreground mb-6 text-center max-w-md">
           {error?.message || "We couldn't find the book you're looking for."}
         </p>
@@ -258,7 +258,7 @@ export default function BookDetails() {
               )}
 
               {/* Title */}
-              <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold text-foreground font-serif tracking-tight leading-tight">
+              <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold text-foreground tracking-tight leading-tight">
                 {book.title}
               </h1>
 
@@ -310,7 +310,7 @@ export default function BookDetails() {
 
               {/* Description */}
               <div className="max-w-2xl">
-                <h2 className="text-lg font-semibold text-foreground mb-3 font-serif">Description</h2>
+                <h2 className="text-lg font-semibold text-foreground mb-3">Description</h2>
                 <p className="text-muted-foreground leading-relaxed">
                   {cleanDescription(book.description)}
                 </p>
@@ -434,7 +434,7 @@ export default function BookDetails() {
         {promptSummaries.length > 0 && (
           <section className="space-y-6">
             <div>
-              <h2 className="text-2xl font-bold text-foreground font-serif tracking-tight">
+              <h2 className="text-2xl font-bold text-foreground tracking-tight">
                 Hardcover Prompts
               </h2>
               <p className="text-sm text-muted-foreground mt-2">
@@ -462,7 +462,7 @@ export default function BookDetails() {
                         <p className="text-xs text-primary uppercase tracking-wider font-medium">
                           Hardcover Prompt
                         </p>
-                        <h3 className="text-xl font-semibold text-foreground font-serif">
+                        <h3 className="text-xl font-semibold text-foreground">
                           {prompt?.question || 'Discover similar reads'}
                         </h3>
                         {prompt?.description && (

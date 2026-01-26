@@ -299,7 +299,7 @@ export default function Requests() {
           </div>
           <span className="text-sm font-medium text-primary uppercase tracking-wider">Library</span>
         </div>
-        <h1 className="text-4xl font-bold text-foreground font-serif tracking-tight">
+        <h1 className="text-4xl font-bold text-foreground tracking-tight">
           Requests
         </h1>
         <p className="mt-2 text-muted-foreground">

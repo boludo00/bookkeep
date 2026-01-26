@@ -96,7 +96,7 @@ export default function Discover() {
             <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/20 shadow-lg shadow-primary/10">
               <Settings className="h-10 w-10 text-primary" />
             </div>
-            <CardTitle className="text-3xl font-bold text-foreground font-serif tracking-tight">
+            <CardTitle className="text-3xl font-bold text-foreground tracking-tight">
               Hardcover API Token Required
             </CardTitle>
             <CardDescription className="text-base mt-3 text-muted-foreground">
@@ -148,7 +148,7 @@ export default function Discover() {
             </div>
             <span className="text-sm font-medium text-primary uppercase tracking-wider">Welcome back</span>
           </div>
-          <h1 className="text-4xl sm:text-5xl font-bold text-foreground font-serif tracking-tight">
+          <h1 className="text-4xl sm:text-5xl font-bold text-foreground tracking-tight">
             Discover Books
           </h1>
           <p className="mt-3 text-lg text-muted-foreground max-w-2xl">

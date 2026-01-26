@@ -114,7 +114,7 @@ export default function Login() {
             </div>
           </div>
           <div className="space-y-2">
-            <CardTitle className="text-3xl font-bold font-serif tracking-tight">
+            <CardTitle className="text-3xl font-bold tracking-tight">
               Welcome back
             </CardTitle>
             <CardDescription className="text-base text-muted-foreground">

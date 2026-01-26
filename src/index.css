@@ -331,7 +331,6 @@
   /* ─── Section Headers ─── */
   .section-title {
     @apply text-2xl font-bold tracking-tight;
-    font-family: var(--font-serif);
   }
 
   .section-title::after {

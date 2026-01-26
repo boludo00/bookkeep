@@ -53,7 +53,7 @@ export function BookRow({ title, books, viewAllLink, requestStatusMap }: BookRow
       {title && (
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-4">
-            <h2 className="text-2xl font-bold text-foreground tracking-tight font-serif">
+            <h2 className="text-2xl font-bold text-foreground tracking-tight">
               {title}
             </h2>
             <div className="h-px w-16 bg-gradient-to-r from-primary/50 to-transparent hidden sm:block" />
