@@ -460,7 +460,7 @@ async def sync_from_booklore():
                         BookRequest.book_id == existing_by_booklore.id,
                         BookRequest.format == format_type
                     ).first()
-                    if existing_request and existing_request.status in ("processing", "approved", "requested"):
+                    if existing_request and existing_request.status in ("processing", "approved", "pending"):
                         existing_request.status = "available"
                         existing_request.updated_at = datetime.now(timezone.utc)
                         updated_count += 1
@@ -789,7 +789,7 @@ async def sync_from_booklore():
                 BookRequest.format == format_type  # Match the format from Booklore
             ).first()
             
-            if existing_request and existing_request.status in ("processing", "approved", "requested"):
+            if existing_request and existing_request.status in ("processing", "approved", "pending"):
                 existing_request.status = "available"
                 existing_request.updated_at = datetime.now(timezone.utc)
                 updated_count += 1

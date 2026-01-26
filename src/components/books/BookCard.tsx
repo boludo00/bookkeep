@@ -10,7 +10,7 @@ import type { Book } from '@/types/book';
 
 interface BookCardProps {
   book: Book;
-  status?: 'available' | 'requested' | 'none';
+  status?: 'available' | 'pending' | 'none';
   showRating?: boolean;
   enableRequestStatus?: boolean;
   showRequestButton?: boolean;
@@ -45,7 +45,7 @@ export function BookCard({
   const hasActiveRequest = requestStatuses.some(
     (value) => value !== 'not_found' && value !== 'available'
   );
-  const effectiveStatus = status !== 'none' ? status : hasActiveRequest ? 'requested' : 'none';
+  const effectiveStatus = status !== 'none' ? status : hasActiveRequest ? 'pending' : 'none';
   const bookLink = book.seriesId
     ? `/book/${book.id}?seriesId=${book.seriesId}`
     : `/book/${book.id}`;
@@ -93,7 +93,7 @@ export function BookCard({
               )}
 
               {/* Requested badge */}
-              {!isAnyFormatAvailable && effectiveStatus === 'requested' && (
+              {!isAnyFormatAvailable && effectiveStatus === 'pending' && (
                 <div className="absolute top-2.5 right-2.5">
                   <div
                     className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-500/90 text-amber-foreground shadow-lg shadow-amber-500/30 backdrop-blur-sm"

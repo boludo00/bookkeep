@@ -28,7 +28,7 @@ export interface BookRequest {
   userId: string;
   userName: string;
   format: 'ebook' | 'audiobook';
-  status: 'requested' | 'approved' | 'denied' | 'processing' | 'available' | 'not_found';
+  status: 'pending' | 'approved' | 'denied' | 'processing' | 'available' | 'not_found';
   source?: 'user_request' | 'booklore_import';
   notes?: string;
   adminNotes?: string;
@@ -51,8 +51,8 @@ export interface User {
 export interface RequestStatus {
   hardcover_id: number;
   book_id: number | null;
-  ebook: 'requested' | 'approved' | 'denied' | 'processing' | 'available' | 'not_found' | null;
-  audiobook: 'requested' | 'approved' | 'denied' | 'processing' | 'available' | 'not_found' | null;
+  ebook: 'pending' | 'approved' | 'denied' | 'processing' | 'available' | 'not_found' | null;
+  audiobook: 'pending' | 'approved' | 'denied' | 'processing' | 'available' | 'not_found' | null;
   ebook_readarr_book_id?: number | null;
   audiobook_readarr_book_id?: number | null;
 }
