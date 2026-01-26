@@ -83,10 +83,10 @@ class TestSearch:
     """Test search functionality"""
 
     def test_search_ebook_basic(self, mock_prowlarr_source):
-        # Mock search results
+        # Mock search results - include author name in title for author validation
         mock_prowlarr_source.client.search_with_retry.return_value = [
             {
-                "title": "Test Book [EPUB]",
+                "title": "Test Book - Test Author [EPUB]",
                 "downloadUrl": "http://download/1",
                 "size": 2048000,
                 "protocol": "torrent",
@@ -101,8 +101,8 @@ class TestSearch:
             format_type="ebook"
         )
 
-        # Verify search was called with ebook category
-        mock_prowlarr_source.client.search_with_retry.assert_called_once()
+        # Verify search was called with ebook category (may be called multiple times for query variants)
+        mock_prowlarr_source.client.search_with_retry.assert_called()
         call_args = mock_prowlarr_source.client.search_with_retry.call_args
         assert ProwlarrClient.CATEGORY_EBOOK in call_args.kwargs['categories']
 
@@ -161,11 +161,11 @@ class TestSearch:
 
         assert results == []
 
-    def test_search_stops_after_first_query_with_results(self, mock_prowlarr_source):
-        # First query returns results
+    def test_search_tries_multiple_queries_and_deduplicates(self, mock_prowlarr_source):
+        # Multiple queries may return results, but duplicates should be removed
         mock_prowlarr_source.client.search_with_retry.return_value = [
             {
-                "title": "Test Book [EPUB]",
+                "title": "Test Book - Author [EPUB]",
                 "downloadUrl": "http://download/1",
                 "size": 2048000,
                 "protocol": "torrent",
@@ -179,8 +179,9 @@ class TestSearch:
             format_type="ebook"
         )
 
-        # Should only call search once since first query had results
-        assert mock_prowlarr_source.client.search_with_retry.call_count == 1
+        # Should try multiple query variants (up to 4)
+        assert mock_prowlarr_source.client.search_with_retry.call_count >= 1
+        # But results should be deduplicated by URL
         assert len(results) == 1
 
     def test_search_tries_multiple_queries_if_needed(self, mock_prowlarr_source):
@@ -494,10 +495,11 @@ class TestIntegrationScenarios:
 
     def test_complete_ebook_search_flow(self, mock_prowlarr_source):
         """Simulate a complete ebook search"""
+        # Include author name (Fitzgerald) in titles for author validation
         mock_prowlarr_source.client.search_with_retry.return_value = [
             {
                 "guid": "https://indexer.com/1",
-                "title": "The Great Gatsby [EPUB]",
+                "title": "The Great Gatsby - Fitzgerald [EPUB]",
                 "indexerId": 1,
                 "indexer": "TestIndexer",
                 "size": 1048576,  # 1 MB
@@ -510,7 +512,7 @@ class TestIntegrationScenarios:
             },
             {
                 "guid": "https://indexer.com/2",
-                "title": "The Great Gatsby.mobi",
+                "title": "The Great Gatsby - Fitzgerald.mobi",
                 "indexerId": 1,
                 "indexer": "TestIndexer",
                 "size": 900000,
@@ -544,9 +546,10 @@ class TestIntegrationScenarios:
 
     def test_complete_audiobook_search_flow(self, mock_prowlarr_source):
         """Simulate a complete audiobook search"""
+        # Include author name (Weir) in title for author validation
         mock_prowlarr_source.client.search_with_retry.return_value = [
             {
-                "title": "Project Hail Mary.m4b",
+                "title": "Project Hail Mary - Andy Weir.m4b",
                 "size": 524288000,  # 500 MB
                 "downloadUrl": "http://prowlarr/download/1",
                 "protocol": "torrent",
