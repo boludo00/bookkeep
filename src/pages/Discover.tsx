@@ -6,14 +6,13 @@ import { useQuery } from '@tanstack/react-query';
 import { requestsApi, settingsApi } from '@/lib/api';
 import { transformHardcoverBook } from '@/lib/hardcover';
 import type { BookRequest } from '@/types/book';
-import { AlertCircle, Settings, ExternalLink } from 'lucide-react';
+import { AlertCircle, Settings, ExternalLink, Sparkles, TrendingUp, Star, CalendarDays } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Link } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 export default function Discover() {
-  // Check if Hardcover token is configured
   const { data: tokenStatus, isLoading: tokenLoading } = useQuery({
     queryKey: ['hardcover-token-status'],
     queryFn: () => settingsApi.getHardcoverToken(),
@@ -25,9 +24,8 @@ export default function Discover() {
     enabled: tokenStatus?.has_hardcover_token ?? false,
   });
 
-  // Filter out requests without books to prevent UI issues
   const recentRequests: BookRequest[] = requests
-    .filter((req: any) => req.book) // Only include requests with associated books
+    .filter((req: any) => req.book)
     .map((req: any) => ({
       id: String(req.id),
       bookId: String(req.book?.hardcover_id || req.book_id),
@@ -56,7 +54,7 @@ export default function Discover() {
       createdAt: req.created_at,
       updatedAt: req.updated_at,
     }));
-  
+
   const { data: trendingBooks, isLoading: trendingLoading, error: trendingError } = useTrendingBooks(12);
   const { data: popularBooks, isLoading: popularLoading, error: popularError } = usePopularBooks(12);
   const { data: newReleases, isLoading: newLoading, error: newError } = useNewReleases(12);
@@ -93,33 +91,35 @@ export default function Discover() {
   if (!tokenLoading && !hasToken) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
-        <Card className="max-w-2xl w-full bg-card border-border">
-          <CardHeader className="text-center">
-            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
-              <Settings className="h-8 w-8 text-primary" />
+        <Card className="max-w-2xl w-full bg-card/50 backdrop-blur-xl border-border/50 shadow-2xl">
+          <CardHeader className="text-center pb-2">
+            <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/20 shadow-lg shadow-primary/10">
+              <Settings className="h-10 w-10 text-primary" />
             </div>
-            <CardTitle className="text-2xl text-foreground">Hardcover API Token Required</CardTitle>
-            <CardDescription className="text-base mt-2">
+            <CardTitle className="text-3xl font-bold text-foreground tracking-tight">
+              Hardcover API Token Required
+            </CardTitle>
+            <CardDescription className="text-base mt-3 text-muted-foreground">
               To discover books and browse the catalog, you need to configure your Hardcover API token.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2 text-center">
+          <CardContent className="space-y-6 pt-4">
+            <div className="text-center">
               <p className="text-sm text-muted-foreground">
                 Get your API token from{' '}
                 <a
                   href="https://hardcover.app"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-primary hover:underline inline-flex items-center gap-1"
+                  className="text-primary font-medium hover:underline underline-offset-4 inline-flex items-center gap-1.5 transition-colors"
                 >
                   hardcover.app
                   <ExternalLink className="h-3 w-3" />
                 </a>
               </p>
             </div>
-            <div className="flex justify-center pt-4">
-              <Button asChild className="bg-primary hover:bg-primary/90">
+            <div className="flex justify-center pt-2">
+              <Button asChild className="h-12 px-8 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-medium shadow-lg shadow-primary/20">
                 <Link to="/settings">
                   <Settings className="h-4 w-4 mr-2" />
                   Go to Settings
@@ -133,9 +133,32 @@ export default function Discover() {
   }
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-4">
+      {/* Hero section */}
+      <div className="relative mb-10 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 py-8 overflow-hidden">
+        {/* Background gradient */}
+        <div className="absolute inset-0 bg-gradient-to-b from-primary/5 via-transparent to-transparent" />
+        <div className="absolute top-0 left-1/4 w-96 h-96 bg-primary/10 rounded-full blur-[100px]" />
+        <div className="absolute top-0 right-1/4 w-64 h-64 bg-amber-500/5 rounded-full blur-[80px]" />
+
+        <div className="relative">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 border border-primary/20">
+              <Sparkles className="h-5 w-5 text-primary" />
+            </div>
+            <span className="text-sm font-medium text-primary uppercase tracking-wider">Welcome back</span>
+          </div>
+          <h1 className="text-4xl sm:text-5xl font-bold text-foreground tracking-tight">
+            Discover Books
+          </h1>
+          <p className="mt-3 text-lg text-muted-foreground max-w-2xl">
+            Explore trending titles, popular reads, and the latest releases. Your next favorite book is waiting.
+          </p>
+        </div>
+      </div>
+
       {hasError && (
-        <Alert variant="destructive" className="mb-4">
+        <Alert variant="destructive" className="mb-6 rounded-xl border-rose-500/30 bg-rose-500/10">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
             Failed to load some books. Please check your Hardcover API configuration in Settings.

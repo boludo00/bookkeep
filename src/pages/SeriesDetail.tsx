@@ -303,12 +303,12 @@ export default function SeriesDetail() {
       ) : (
         <section>
           <h2 className="text-xl font-bold text-foreground mb-4">Books</h2>
-          <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide -mx-4 px-4">
+          <div className="flex gap-5 overflow-x-auto pt-3 pb-4 scrollbar-hide -mx-4 px-5">
               {booksWithAvailability.map((book, index) => (
                 <div key={book.id} className="flex-shrink-0 w-[140px] sm:w-[160px] relative">
                 {/* Position Badge */}
                 {((book as any).position ?? book.seriesPosition) != null && (
-                  <div className="absolute -top-2 -left-2 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold shadow-lg">
+                  <div className="absolute -top-2.5 -left-2.5 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold shadow-lg ring-2 ring-background">
                     {(book as any).position ?? book.seriesPosition}
                   </div>
                 )}

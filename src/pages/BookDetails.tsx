@@ -24,33 +24,31 @@ export default function BookDetails() {
   const { user } = useUser();
   const bypassCache =
     searchParams.get('bypass_cache') === 'true' || searchParams.get('bypass_cache') === '1';
-  
+
   const { data: book, isLoading, error } = useBookDetails(id);
   const hardcoverId = book?.hardcoverId ?? (book?.id ? Number(book.id) : undefined);
   const hasHardcoverId = Number.isFinite(hardcoverId);
 
-  // Query our database to get actual book data including download status
   const { data: dbBook } = useQuery({
     queryKey: ['book', 'by-hardcover', hardcoverId],
     queryFn: async () => {
       if (!hardcoverId) return null;
-      // Get all books and find by hardcover_id
       const books = await booksApi.getAll(0, 1000);
       return books.find((b: any) => b.hardcover_id === hardcoverId) || null;
     },
     enabled: hasHardcoverId,
-    staleTime: 5 * 1000, // Cache for 5 seconds to see downloads quickly
-    refetchInterval: hasHardcoverId ? 5000 : false, // Poll every 5s for download updates
+    staleTime: 5 * 1000,
+    refetchInterval: hasHardcoverId ? 5000 : false,
   });
 
   const { data: requestStatus } = useQuery({
     queryKey: ['requests', 'by-hardcover', hardcoverId],
     queryFn: () => requestsApi.getByHardcoverId(hardcoverId as number),
     enabled: hasHardcoverId,
-    staleTime: 15 * 1000, // Cache for 15 seconds - balanced for real-time updates
-    refetchOnMount: true, // Refetch on mount but use cache if fresh
-    refetchInterval: hasHardcoverId ? 30000 : false, // Poll every 30s instead of 15s
-    gcTime: 5 * 60 * 1000, // Keep in cache for 5 minutes
+    staleTime: 15 * 1000,
+    refetchOnMount: true,
+    refetchInterval: hasHardcoverId ? 30000 : false,
+    gcTime: 5 * 60 * 1000,
   });
 
   const ebookRequestStatus = requestStatus?.ebook ?? null;
@@ -105,26 +103,26 @@ export default function BookDetails() {
 
   if (isLoading) {
     return (
-      <div className="space-y-8">
-        <Skeleton className="h-6 w-32" />
-        <div className="relative rounded-2xl overflow-hidden bg-card p-8">
+      <div className="space-y-8 animate-fade-in">
+        <Skeleton className="h-6 w-32 rounded-lg" />
+        <div className="relative rounded-2xl overflow-hidden bg-card/50 p-8">
           <div className="flex flex-col md:flex-row gap-8">
             <Skeleton className="w-48 md:w-56 h-80 rounded-xl mx-auto md:mx-0" />
             <div className="flex-1 space-y-4">
-              <Skeleton className="h-8 w-3/4" />
-              <Skeleton className="h-6 w-1/2" />
+              <Skeleton className="h-10 w-3/4 rounded-lg" />
+              <Skeleton className="h-6 w-1/2 rounded-lg" />
               <div className="flex gap-4">
-                <Skeleton className="h-5 w-20" />
-                <Skeleton className="h-5 w-24" />
-                <Skeleton className="h-5 w-20" />
+                <Skeleton className="h-5 w-20 rounded-lg" />
+                <Skeleton className="h-5 w-24 rounded-lg" />
+                <Skeleton className="h-5 w-20 rounded-lg" />
               </div>
               <div className="flex gap-2">
-                <Skeleton className="h-6 w-16" />
-                <Skeleton className="h-6 w-20" />
-                <Skeleton className="h-6 w-18" />
+                <Skeleton className="h-7 w-16 rounded-lg" />
+                <Skeleton className="h-7 w-20 rounded-lg" />
+                <Skeleton className="h-7 w-18 rounded-lg" />
               </div>
-              <Skeleton className="h-24 w-full" />
-              <Skeleton className="h-10 w-36" />
+              <Skeleton className="h-32 w-full rounded-lg" />
+              <Skeleton className="h-12 w-40 rounded-xl" />
             </div>
           </div>
         </div>
@@ -135,12 +133,18 @@ export default function BookDetails() {
   if (error || !book) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[50vh]">
-        <h1 className="text-2xl font-bold text-foreground mb-4">Book Not Found</h1>
-        <p className="text-muted-foreground mb-4">
+        <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-muted/30 mb-6">
+          <BookOpen className="h-10 w-10 text-muted-foreground/50" />
+        </div>
+        <h1 className="text-2xl font-bold text-foreground mb-3">Book Not Found</h1>
+        <p className="text-muted-foreground mb-6 text-center max-w-md">
           {error?.message || "We couldn't find the book you're looking for."}
         </p>
         <Link to="/">
-          <Button variant="outline">Go Back Home</Button>
+          <Button variant="outline" className="h-11 px-6 rounded-xl">
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Go Back Home
+          </Button>
         </Link>
       </div>
     );
@@ -152,7 +156,6 @@ export default function BookDetails() {
 
   const formatDate = (dateStr: string) => {
     if (!dateStr) return 'Unknown';
-    // Handle year-only format
     if (/^\d{4}$/.test(dateStr)) return dateStr;
     try {
       return new Date(dateStr).toLocaleDateString('en-US', {
@@ -165,7 +168,6 @@ export default function BookDetails() {
     }
   };
 
-  // Strip HTML tags from description
   const cleanDescription = (html: string) => {
     if (!html) return 'No description available.';
     return html.replace(/<[^>]*>/g, '').trim();
@@ -202,69 +204,77 @@ export default function BookDetails() {
 
   return (
     <>
-      <div className="space-y-8">
+      <div className="space-y-10 animate-fade-in-up">
         {/* Back Button */}
         <Link
           to="/"
-          className="inline-flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors"
+          className="inline-flex items-center gap-2 text-muted-foreground hover:text-primary transition-colors duration-300 group"
         >
-          <ArrowLeft className="h-4 w-4" />
-          Back to Discover
+          <ArrowLeft className="h-4 w-4 transition-transform duration-300 group-hover:-translate-x-1" />
+          <span className="font-medium">Back to Discover</span>
         </Link>
 
         {/* Hero Section */}
-        <div className="relative rounded-2xl overflow-hidden">
-          {/* Background */}
+        <div className="relative rounded-3xl overflow-hidden">
+          {/* Blurred cover background */}
           <div className="absolute inset-0">
             <img
               src={book.cover}
               alt=""
-              className="h-full w-full object-cover opacity-30 blur-3xl scale-110"
+              className="h-full w-full object-cover opacity-20 blur-3xl scale-125"
             />
             <div className="absolute inset-0 bg-gradient-to-r from-background via-background/95 to-background/80" />
+            <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-background/50" />
           </div>
 
           {/* Content */}
-          <div className="relative flex flex-col md:flex-row gap-8 p-8">
+          <div className="relative flex flex-col md:flex-row gap-8 lg:gap-12 p-6 md:p-10">
             {/* Cover */}
-            <div className="flex-shrink-0">
-              <img
-                src={book.cover}
-                alt={book.title}
-                className="w-48 md:w-56 rounded-xl shadow-2xl mx-auto md:mx-0"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src = '/placeholder.svg';
-                }}
-              />
+            <div className="flex-shrink-0 mx-auto md:mx-0">
+              <div className="book-cover-glow">
+                <div className="book-cover w-52 md:w-64 aspect-[2/3]">
+                  <img
+                    src={book.cover}
+                    alt={book.title}
+                    className="h-full w-full object-cover"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = '/placeholder.svg';
+                    }}
+                  />
+                </div>
+              </div>
             </div>
 
             {/* Info */}
-            <div className="flex-1 space-y-4">
-              <div>
-                {book.series && book.seriesId && (
-                  <Link 
-                    to={`/series/${book.seriesId}`}
-                    className="text-primary text-sm font-medium mb-1 hover:underline"
-                  >
-                    {book.series} {book.seriesPosition ? `#${book.seriesPosition}` : ''}
-                  </Link>
-                )}
-                <h1 className="text-3xl md:text-4xl font-bold text-foreground">
-                  {book.title}
-                </h1>
+            <div className="flex-1 space-y-5 text-center md:text-left">
+              {/* Series link */}
+              {book.series && book.seriesId && (
                 <Link
-                  to={`/author?name=${encodeURIComponent(book.author)}`}
-                  className="text-xl text-primary mt-2 inline-flex underline-offset-4 hover:underline hover:text-primary/90 transition-colors"
+                  to={`/series/${book.seriesId}`}
+                  className="inline-flex items-center gap-2 text-primary text-sm font-medium hover:underline underline-offset-4"
                 >
-                  {book.author}
+                  {book.series} {book.seriesPosition ? `#${book.seriesPosition}` : ''}
                 </Link>
-              </div>
+              )}
 
-              {/* Meta */}
-              <div className="flex flex-wrap gap-4 text-sm">
-                <div className="flex items-center gap-2 text-foreground">
-                  <Star className="h-4 w-4 fill-warning text-warning" />
-                  <span className="font-medium">{formatRating(book.rating)}</span>
+              {/* Title */}
+              <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold text-foreground tracking-tight leading-tight">
+                {book.title}
+              </h1>
+
+              {/* Author */}
+              <Link
+                to={`/author?name=${encodeURIComponent(book.author)}`}
+                className="inline-block text-xl text-primary font-medium hover:underline underline-offset-4 transition-colors"
+              >
+                {book.author}
+              </Link>
+
+              {/* Meta info */}
+              <div className="flex flex-wrap justify-center md:justify-start gap-5 text-sm">
+                <div className="flex items-center gap-2">
+                  <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
+                  <span className="font-semibold text-foreground">{formatRating(book.rating)}</span>
                 </div>
                 <div className="flex items-center gap-2 text-muted-foreground">
                   <Calendar className="h-4 w-4" />
@@ -278,21 +288,20 @@ export default function BookDetails() {
                 )}
                 {book.isbn && (
                   <div className="flex items-center gap-2 text-muted-foreground">
-                    <span className="text-xs">ISBN: {book.isbn}</span>
+                    <span className="text-xs font-mono">ISBN: {book.isbn}</span>
                   </div>
                 )}
               </div>
 
               {/* Genres */}
               {book.genres.length > 0 && (
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap justify-center md:justify-start gap-2">
                   {book.genres.map((genre) => (
                     <Badge
                       key={genre}
                       variant="secondary"
-                      className="bg-secondary/80 text-secondary-foreground"
+                      className="px-3 py-1 rounded-lg bg-muted/50 border-border/50 text-muted-foreground font-medium"
                     >
-                      <Tag className="h-3 w-3 mr-1" />
                       {genre}
                     </Badge>
                   ))}
@@ -301,16 +310,16 @@ export default function BookDetails() {
 
               {/* Description */}
               <div className="max-w-2xl">
-                <h2 className="text-lg font-semibold text-foreground mb-2">Description</h2>
+                <h2 className="text-lg font-semibold text-foreground mb-3">Description</h2>
                 <p className="text-muted-foreground leading-relaxed">
                   {cleanDescription(book.description)}
                 </p>
               </div>
 
-              {/* Availability Badges */}
-              <div className="flex flex-wrap gap-2 pt-2">
+              {/* Availability badges */}
+              <div className="flex flex-wrap justify-center md:justify-start gap-2 pt-2">
                 {ebookAvailable && (
-                  <div className="group flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 relative">
+                  <div className="group flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
                     <BookOpen className="h-4 w-4 text-emerald-400" />
                     <span className="text-sm font-medium text-emerald-400">eBook Available</span>
                     {dbBook?.id && dbBook.ebook_available && (
@@ -320,7 +329,7 @@ export default function BookDetails() {
                             clearAvailabilityMutation.mutate({ bookId: dbBook.id, formatType: 'ebook' });
                           }
                         }}
-                        className="ml-1 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:bg-emerald-500/30 rounded-full"
+                        className="ml-1 opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-emerald-500/20 rounded-lg"
                         title="Clear eBook availability"
                       >
                         <X className="h-3 w-3 text-emerald-400" />
@@ -329,9 +338,9 @@ export default function BookDetails() {
                   </div>
                 )}
                 {audiobookAvailable && (
-                  <div className="group flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 relative">
-                    <BookOpen className="h-4 w-4 text-emerald-400" />
-                    <span className="text-sm font-medium text-emerald-400">Audiobook Available</span>
+                  <div className="group flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-500/10 border border-violet-500/30">
+                    <Headphones className="h-4 w-4 text-violet-400" />
+                    <span className="text-sm font-medium text-violet-400">Audiobook Available</span>
                     {dbBook?.id && dbBook.audiobook_available && (
                       <button
                         onClick={() => {
@@ -339,24 +348,24 @@ export default function BookDetails() {
                             clearAvailabilityMutation.mutate({ bookId: dbBook.id, formatType: 'audiobook' });
                           }
                         }}
-                        className="ml-1 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:bg-emerald-500/30 rounded-full"
+                        className="ml-1 opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-violet-500/20 rounded-lg"
                         title="Clear audiobook availability"
                       >
-                        <X className="h-3 w-3 text-emerald-400" />
+                        <X className="h-3 w-3 text-violet-400" />
                       </button>
                     )}
                   </div>
                 )}
               </div>
 
-              {/* Actions */}
-              <div className="flex flex-wrap gap-3 pt-2">
+              {/* Action buttons */}
+              <div className="flex flex-wrap justify-center md:justify-start gap-3 pt-4">
                 {!hasAnyRequests && hasMissingFormat && canRequestAnything && (
                   <>
                     <Button
                       size="lg"
                       onClick={() => setRequestOpen(true)}
-                      className="bg-primary hover:bg-primary/90 glow-primary"
+                      className="h-12 px-6 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-medium shadow-lg shadow-primary/25 transition-all duration-300 hover:shadow-primary/40"
                     >
                       <Clock className="h-4 w-4 mr-2" />
                       {preferredFormat === 'ebook'
@@ -373,7 +382,7 @@ export default function BookDetails() {
                           setSearchFormat(preferredFormat || 'ebook');
                           setSearchOpen(true);
                         }}
-                        className="border-border hover:bg-accent"
+                        className="h-12 px-6 rounded-xl border-border/50 hover:bg-card hover:border-primary/30"
                       >
                         <Search className="h-4 w-4 mr-2" />
                         Search Book
@@ -382,7 +391,7 @@ export default function BookDetails() {
                   </>
                 )}
                 {hasAnyRequests && !ebookAvailable && !audiobookAvailable && (
-                  <div className="inline-flex items-center gap-2 rounded-full border border-primary/40 bg-primary/10 px-4 py-2 text-sm font-medium text-primary">
+                  <div className="inline-flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-5 py-3 text-sm font-medium text-amber-400">
                     <Clock className="h-4 w-4" />
                     Requested • Processing
                   </div>
@@ -392,7 +401,7 @@ export default function BookDetails() {
                     size="lg"
                     variant="outline"
                     asChild
-                    className="border-border hover:bg-accent"
+                    className="h-12 px-6 rounded-xl border-border/50 hover:bg-card hover:border-primary/30"
                   >
                     <a
                       href={`https://hardcover.app/books/${book.hardcoverSlug}`}
@@ -410,7 +419,7 @@ export default function BookDetails() {
                     variant="outline"
                     onClick={() => clearRequestsMutation.mutate()}
                     disabled={clearRequestsMutation.isPending}
-                    className="border-destructive/50 text-destructive hover:bg-destructive/10 hover:border-destructive"
+                    className="h-12 px-6 rounded-xl border-rose-500/30 text-rose-400 hover:bg-rose-500/10 hover:border-rose-500/50"
                   >
                     <Trash2 className="h-4 w-4 mr-2" />
                     {clearRequestsMutation.isPending ? 'Clearing...' : 'Clear Request'}
@@ -421,11 +430,14 @@ export default function BookDetails() {
           </div>
         </div>
 
+        {/* Hardcover Prompts */}
         {promptSummaries.length > 0 && (
-          <section className="space-y-5">
-            <div className="flex flex-col gap-2">
-              <h2 className="text-xl font-bold text-foreground">Hardcover Prompts</h2>
-              <p className="text-sm text-muted-foreground">
+          <section className="space-y-6">
+            <div>
+              <h2 className="text-2xl font-bold text-foreground tracking-tight">
+                Hardcover Prompts
+              </h2>
+              <p className="text-sm text-muted-foreground mt-2">
                 Prompts this book appears in, with top picks from each.
               </p>
             </div>
@@ -442,14 +454,15 @@ export default function BookDetails() {
                 return (
                   <div
                     key={promptKey}
-                    className="rounded-2xl border border-border bg-card/80 p-5"
+                    className="rounded-2xl border border-border/50 bg-card/30 backdrop-blur-sm p-6 animate-fade-in-up"
+                    style={{ animationDelay: `${index * 100}ms` }}
                   >
-                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                       <div className="space-y-2 flex-1">
-                        <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                        <p className="text-xs text-primary uppercase tracking-wider font-medium">
                           Hardcover Prompt
                         </p>
-                        <h3 className="text-lg font-semibold text-foreground">
+                        <h3 className="text-xl font-semibold text-foreground">
                           {prompt?.question || 'Discover similar reads'}
                         </h3>
                         {prompt?.description && (
@@ -457,7 +470,7 @@ export default function BookDetails() {
                             {prompt.description}
                           </p>
                         )}
-                        <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+                        <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
                           {prompt?.answers_count != null && (
                             <span>{prompt.answers_count} answers</span>
                           )}
@@ -471,7 +484,7 @@ export default function BookDetails() {
                       </div>
                       {prompt?.slug && promptBooks.length > defaultVisible && (
                         <Link to={`/prompt/${prompt.slug}`}>
-                          <Button variant="outline" size="sm" className="whitespace-nowrap">
+                          <Button variant="outline" size="sm" className="rounded-lg">
                             {prompt.books_count && prompt.books_count > promptBooks.length
                               ? `View More (${prompt.books_count} total)`
                               : `View All ${promptBooks.length} Books`}
@@ -480,11 +493,11 @@ export default function BookDetails() {
                       )}
                     </div>
                     {visibleBooks.length > 0 && (
-                      <div className="mt-4 flex gap-4 overflow-x-auto pb-4 scrollbar-hide -mx-2 px-2">
+                      <div className="mt-6 flex gap-4 overflow-x-auto pb-4 scrollbar-hide -mx-2 px-2">
                         {visibleBooks.map((promptBook) => (
                           <div
                             key={promptBook.id}
-                            className="flex-shrink-0 w-[140px] sm:w-[160px]"
+                            className="flex-shrink-0 w-[130px] sm:w-[150px]"
                           >
                             <BookCard book={promptBook} showRating={false} showRequestButton={false} />
                           </div>
@@ -499,39 +512,39 @@ export default function BookDetails() {
         )}
       </div>
 
-        <RequestDialog
-          book={book}
-          open={requestOpen}
-          onOpenChange={setRequestOpen}
-          preferredFormat={preferredFormat}
-          disableFormats={{
-            ebook: ebookAvailable,
-            audiobook: audiobookAvailable,
-          }}
-        />
+      <RequestDialog
+        book={book}
+        open={requestOpen}
+        onOpenChange={setRequestOpen}
+        preferredFormat={preferredFormat}
+        disableFormats={{
+          ebook: ebookAvailable,
+          audiobook: audiobookAvailable,
+        }}
+      />
 
-        {searchOpen && (
-          <SearchReleaseDialog
-            book={{
-              id: dbBook?.id ?? requestStatus?.book_id ?? undefined,
-              hardcoverId: hardcoverId,
-              title: book.title,
-              author: book.author,
-              isbn: book.isbn,
-              description: book.description,
-              cover: book.cover,
-              publishedDate: book.publishedDate,
-              rating: book.rating,
-              pageCount: book.pageCount,
-              series: book.series,
-              seriesPosition: book.seriesPosition,
-              genres: book.genres,
-            }}
-            open={searchOpen}
-            onOpenChange={setSearchOpen}
-            formatType={searchFormat}
-          />
-        )}
+      {searchOpen && (
+        <SearchReleaseDialog
+          book={{
+            id: dbBook?.id ?? requestStatus?.book_id ?? undefined,
+            hardcoverId: hardcoverId,
+            title: book.title,
+            author: book.author,
+            isbn: book.isbn,
+            description: book.description,
+            cover: book.cover,
+            publishedDate: book.publishedDate,
+            rating: book.rating,
+            pageCount: book.pageCount,
+            series: book.series,
+            seriesPosition: book.seriesPosition,
+            genres: book.genres,
+          }}
+          open={searchOpen}
+          onOpenChange={setSearchOpen}
+          formatType={searchFormat}
+        />
+      )}
     </>
   );
 }
