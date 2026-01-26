@@ -7,13 +7,7 @@ import structlog
 from app import database, models, schemas
 from app.cache import get_cached, set_cached, delete_cached, make_cache_key, CACHE_TTL, clear_cache_pattern
 from app.auth import get_current_user, require_admin
-from app.routers.readarr import add_book_to_readarr
-from app.services.readarr_service import (
-    ReadarrClient,
-    get_readarr_server_for_format,
-    is_format_available_in_readarr,
-    get_readarr_availability_map,
-)
+from app.downloads import DownloadOrchestrator
 from app.routers.users import get_password_hash
 
 logger = structlog.get_logger(__name__)
@@ -58,23 +52,14 @@ async def create_request(
             detail=f"You do not have permission to request {request.format}s"
         )
 
-    # Optional: Block requests for formats already available in Readarr (if configured)
-    try:
-        if book.hardcover_id and await is_format_available_in_readarr(
-            db,
-            book.hardcover_id,
-            request.format,
-            isbns=[book.isbn] if book.isbn else None,
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"{request.format.capitalize()} already available in Readarr."
-            )
-    except HTTPException:
-        raise
-    except Exception as e:
-        # Don't fail the request if Readarr check fails - just log it
-        logger.warning("readarr_availability_check_failed", error=str(e), book_id=book.id)
+    # Block requests for formats already available in our library
+    if (request.format == "ebook" and book.ebook_available) or (
+        request.format == "audiobook" and book.audiobook_available
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"{request.format.capitalize()} is already available."
+        )
 
     # Check if this book+format already has a request (global - any user)
     # Only allow new requests if existing ones are denied or don't exist
@@ -91,7 +76,7 @@ async def create_request(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="This request belongs to another user and cannot be resubmitted."
             )
-        # Re-open the request and re-send to Readarr below.
+        # Re-open the request for processing below.
         db_request = existing_request
     elif existing_request:
         # This format already requested - return existing request info
@@ -103,7 +88,7 @@ async def create_request(
         
         format_label = "ebook" if request.format == "ebook" else "audiobook"
         status_message = {
-            "requested": f"The {format_label} has already been requested and is pending approval.",
+            "pending": f"The {format_label} has already been requested and is pending approval.",
             "approved": f"The {format_label} has already been approved and is being processed.",
             "processing": f"The {format_label} is currently being processed.",
             "available": f"The {format_label} is already available."
@@ -122,15 +107,11 @@ async def create_request(
         auto_approve = True
     
     # Create or re-open request with appropriate initial status
-    initial_status = "approved" if auto_approve else "requested"
+    initial_status = "approved" if auto_approve else "pending"
     if existing_request and existing_request.status == "not_found":
         db_request.status = initial_status
         db_request.notes = request.notes
         db_request.admin_notes = None
-        db_request.readarr_received = None
-        db_request.readarr_search_triggered = None
-        db_request.readarr_search_status_code = None
-        db_request.readarr_message = None
         db_request.edition_id = request.edition_id
         db_request.updated_at = datetime.now(timezone.utc)
         db.add(db_request)
@@ -159,10 +140,6 @@ async def create_request(
     # Automatically trigger download if auto-approved
     if auto_approve:
         try:
-            # Import download orchestrator
-            from app.downloads import DownloadOrchestrator
-
-            # Trigger automatic download via Prowlarr
             orchestrator = DownloadOrchestrator(db_session=db)
             task = orchestrator.search_and_download(
                 book=db_request.book,
@@ -294,16 +271,10 @@ async def get_requests_for_hardcover_book(
     result = {
         "ebook": None,
         "audiobook": None,
-        "ebook_readarr_book_id": None,
-        "audiobook_readarr_book_id": None,
         "book_id": book.id,
     }
     for r in requests:
         result[r.format] = r.status
-        if r.format == "ebook":
-            result["ebook_readarr_book_id"] = r.readarr_book_id
-        elif r.format == "audiobook":
-            result["audiobook_readarr_book_id"] = r.readarr_book_id
     
     logger.debug("requests_for_hardcover_book", 
                 hardcover_id=hardcover_id, 
@@ -479,31 +450,11 @@ async def request_series(
     failed_count = 0
     failed_books = []  # Track which books failed for better user feedback
 
-    availability_map = {}
-    hardcover_ids = [book.hardcover_id for book in books_in_series if book.hardcover_id]
-    isbn_map = {
-        int(book.hardcover_id): [book.isbn]
-        for book in books_in_series
-        if book.hardcover_id and book.isbn
-    }
-    if hardcover_ids:
-        try:
-            availability_map = await get_readarr_availability_map(db, hardcover_ids, isbn_map=isbn_map)
-        except Exception as e:
-            logger.warning("series_readarr_availability_failed", error=str(e))
-    
     for book in books_in_series:
-        # Check if book is already available for this format (Readarr preferred)
-        readarr_availability = availability_map.get(book.hardcover_id or 0, {})
-        readarr_has_format = (
-            (format == "ebook" and readarr_availability.get("ebook"))
-            or (format == "audiobook" and readarr_availability.get("audiobook"))
-        )
-        if readarr_has_format or (format == "ebook" and book.ebook_available):
-            already_available += 1
-            skipped_count += 1
-            continue
-        elif format == "audiobook" and book.audiobook_available:
+        # Check if book is already available for this format
+        if (format == "ebook" and book.ebook_available) or (
+            format == "audiobook" and book.audiobook_available
+        ):
             already_available += 1
             skipped_count += 1
             continue
@@ -527,7 +478,7 @@ async def request_series(
         elif format == "audiobook" and current_user.auto_approve_audiobooks:
             should_auto_approve = True
         
-        initial_status = "approved" if should_auto_approve else "requested"
+        initial_status = "approved" if should_auto_approve else "pending"
         
         # Create the request
         now = datetime.now(timezone.utc)
@@ -543,67 +494,45 @@ async def request_series(
         db.add(new_request)
         db.flush()  # Get the ID
         
-        # Add to Readarr if auto-approved
+        # Trigger download if auto-approved
         if should_auto_approve:
-            readarr_server = get_readarr_server_for_format(format, db)
-            if readarr_server:
-                try:
-                    result = await add_book_to_readarr(
-                        readarr_server,
-                        book,
-                        format,
-                        db,
-                        edition_id=new_request.edition_id
-                    )
-                    readarr_book_id = result.get("readarr_book_id")
+            try:
+                orchestrator = DownloadOrchestrator(db_session=db)
+                task = orchestrator.search_and_download(
+                    book=book,
+                    format_type=format,
+                    source_name="prowlarr"
+                )
+
+                if task:
                     new_request.status = "processing"
-                    if readarr_book_id:
-                        new_request.readarr_book_id = readarr_book_id
-
-                    # Store Readarr tracking information
-                    new_request.readarr_received = True
-                    new_request.readarr_search_triggered = result.get("readarr_search_triggered")
-                    new_request.readarr_search_status_code = result.get("readarr_search_status_code")
-
-                    logger.info("series_book_added_to_readarr",
+                    logger.info("series_book_download_triggered",
                                series_id=series_id,
                                book_id=book.id,
                                book_title=book.title,
-                               readarr_book_id=readarr_book_id)
-                except Exception as e:
-                    error_msg = str(e)
-                    logger.warning("series_book_readarr_failed",
+                               task_id=task.id)
+                else:
+                    logger.warning("series_book_no_releases",
                                   series_id=series_id,
                                   book_id=book.id,
                                   book_title=book.title,
-                                  error=error_msg)
-
-                    # Mark request as failed and rollback this specific request
-                    new_request.readarr_received = False
-                    new_request.readarr_message = error_msg
-                    new_request.notes = (new_request.notes or "") + f"\n[Error] Readarr: {error_msg}"
-
-                    # Track the failure for user feedback
-                    failed_count += 1
-                    failed_books.append({
-                        "title": book.title,
-                        "position": book.series_position,
-                        "error": error_msg
-                    })
-
-                    # Don't count this as successfully requested
-                    requested_count -= 1
-            else:
-                logger.warning("series_book_no_readarr_server",
+                                  format=format)
+                    # Keep as approved — can be retried
+            except Exception as e:
+                error_msg = str(e)
+                logger.warning("series_book_download_failed",
                               series_id=series_id,
                               book_id=book.id,
-                              format=format)
-                new_request.notes = (new_request.notes or "") + f"\n[Error] No Readarr server configured for {format}"
+                              book_title=book.title,
+                              error=error_msg)
+
+                new_request.notes = (new_request.notes or "") + f"\n[Error] Download: {error_msg}"
+
                 failed_count += 1
                 failed_books.append({
                     "title": book.title,
                     "position": book.series_position,
-                    "error": f"No Readarr server configured for {format}"
+                    "error": error_msg
                 })
                 requested_count -= 1
         
@@ -803,7 +732,7 @@ async def update_request(
     
     db.commit()
     
-    # If status changed to approved, send to Readarr
+    # If status changed to approved, trigger download via Prowlarr
     if status_changing_to_approved:
         try:
             # Eager load book relationship
@@ -811,68 +740,47 @@ async def update_request(
             db_request = db.query(models.BookRequest).options(
                 joinedload(models.BookRequest.book)
             ).filter(models.BookRequest.id == db_request.id).first()
-            
+
             if not db_request.book:
                 logger.warning("request_approved_no_book", request_id=request_id)
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Cannot approve request: book not found"
                 )
-            
-            # Get appropriate Readarr server based on format
-            readarr_server = get_readarr_server_for_format(db_request.format, db)
-            
-            if not readarr_server:
-                logger.warning(
-                    "request_approved_no_readarr_server",
+
+            orchestrator = DownloadOrchestrator(db_session=db)
+            task = orchestrator.search_and_download(
+                book=db_request.book,
+                format_type=db_request.format,
+                source_name="prowlarr"
+            )
+
+            if task:
+                logger.info(
+                    "approval_download_triggered",
                     request_id=request_id,
+                    task_id=task.id,
                     format=db_request.format
                 )
-                # Don't fail the request, just log it
-                db_request.admin_notes = (
-                    (db_request.admin_notes or "") + 
-                    "\n[Warning] No Readarr server configured for this format."
-                )
+                db_request.status = "processing"
                 db.commit()
             else:
-                # Add book to Readarr
-                try:
-                    result = await add_book_to_readarr(
-                        readarr_server,
-                        db_request.book,
-                        db_request.format,
-                        db,
-                        edition_id=db_request.edition_id
-                    )
-                    readarr_book_id = result.get("readarr_book_id")
-                    logger.info(
-                        "request_sent_to_readarr",
-                        request_id=request_id,
-                        readarr_book_id=readarr_book_id,
-                        server_id=readarr_server.id
-                    )
-                    # Store readarr_book_id in the column
-                    if readarr_book_id:
-                        db_request.readarr_book_id = readarr_book_id
-                    # Update status to processing
-                    db_request.status = "processing"
-                    db.commit()
-                except Exception as e:
-                    logger.error(
-                        "readarr_add_failed",
-                        request_id=request_id,
-                        error=str(e)
-                    )
-                    # Update admin notes with error
-                    db_request.admin_notes = (
-                        (db_request.admin_notes or "") + 
-                        f"\n[Error] Failed to add to Readarr: {str(e)}"
-                    )
-                    db.commit()
-                    # Don't fail the request approval, just log the error
+                logger.warning(
+                    "approval_download_no_releases",
+                    request_id=request_id,
+                    book_id=db_request.book_id,
+                    format=db_request.format
+                )
+                # Keep as approved — admin can retry
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error("request_approval_error", request_id=request_id, error=str(e))
-            # Don't fail the request update, just log the error
+            db_request.admin_notes = (
+                (db_request.admin_notes or "") +
+                f"\n[Error] Download search failed: {str(e)}"
+            )
+            db.commit()
     
     # Eager load relationships
     from sqlalchemy.orm import joinedload
@@ -910,226 +818,96 @@ async def delete_request(request_id: int, db: Session = Depends(database.get_db)
         await clear_cache_pattern("requests_by_hardcover_batch:*")
     return None
 
-def _extract_readarr_book_id_from_notes(admin_notes: str) -> Optional[int]:
-    """Extract readarr_book_id from admin_notes (legacy storage)"""
-    if not admin_notes:
-        return None
-    import re
-    match = re.search(r'\[Readarr Book ID: (\d+)\]', admin_notes)
-    if match:
-        return int(match.group(1))
-    return None
-
-
-async def _lookup_readarr_book_id(server: models.ReadarrServer, hardcover_id: int) -> Optional[int]:
-    """Look up a book in Readarr by Hardcover ID and return the Readarr book ID"""
-    from app.services.readarr_service import build_readarr_url
-    import httpx
-    
-    base_url = build_readarr_url(server.hostname, server.port, server.use_ssl, server.url_base)
-    api_url = f"{base_url}/api/v1"
-    
-    headers = {
-        "X-Api-Key": server.api_key,
-        "Content-Type": "application/json"
-    }
-    
-    logger.info("lookup_readarr_book_id_starting",
-               hardcover_id=hardcover_id,
-               api_url=api_url)
-    
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            # Search for the book by foreignBookId (Hardcover ID)
-            # First try to get all books and find the matching one
-            response = await client.get(
-                f"{api_url}/book",
-                headers=headers
-            )
-            
-            logger.info("readarr_book_list_response",
-                       status_code=response.status_code,
-                       content_length=len(response.content) if response.content else 0)
-            
-            if response.status_code == 200:
-                books = response.json()
-                logger.info("readarr_library_books",
-                           total_books=len(books),
-                           sample_foreign_ids=[str(b.get("foreignBookId")) for b in books[:5]] if books else [])
-                
-                for book in books:
-                    foreign_id = book.get("foreignBookId")
-                    if str(foreign_id) == str(hardcover_id):
-                        readarr_book_id = book.get("id")
-                        logger.info("found_readarr_book_id",
-                                   hardcover_id=hardcover_id,
-                                   readarr_book_id=readarr_book_id,
-                                   title=book.get("title"))
-                        return readarr_book_id
-                
-                logger.warning("book_not_found_in_readarr_library",
-                             hardcover_id=hardcover_id,
-                             searched_books_count=len(books))
-            else:
-                logger.warning("readarr_book_lookup_failed",
-                             hardcover_id=hardcover_id,
-                             status_code=response.status_code,
-                             response_text=response.text[:200] if response.text else None)
-    except Exception as e:
-        logger.error("readarr_book_lookup_error",
-                    hardcover_id=hardcover_id,
-                    error=str(e),
-                    error_type=type(e).__name__)
-    
-    return None
-
 
 async def update_processing_requests_status(db: Session) -> None:
-    """Background task to check Readarr for book availability and update processing requests"""
+    """Background task to check DownloadTask table and update processing requests."""
     try:
         from sqlalchemy.orm import joinedload
         not_found_after = timedelta(hours=6)
-        
+        now = datetime.now(timezone.utc)
+
         # Get all processing requests
         processing_requests = db.query(models.BookRequest).options(
             joinedload(models.BookRequest.book)
         ).filter(
             models.BookRequest.status == "processing"
         ).all()
-        
+
         if not processing_requests:
             logger.debug("no_processing_requests_to_check")
             return
-        
+
         logger.info("checking_processing_requests", count=len(processing_requests))
-        
-        # Get Readarr servers for each format
-        ebook_server = db.query(models.ReadarrServer).filter(
-            models.ReadarrServer.is_audiobook == False
-        ).first()
-        
-        audiobook_server = db.query(models.ReadarrServer).filter(
-            models.ReadarrServer.is_audiobook == True
-        ).first()
-        
-        if not ebook_server and not audiobook_server:
-            logger.warning("no_readarr_servers_configured")
-            return
-        
-        logger.info("using_readarr_servers", 
-                   ebook_server_id=ebook_server.id if ebook_server else None,
-                   audiobook_server_id=audiobook_server.id if audiobook_server else None)
-        
-        # Check each request against the appropriate Readarr server
+
         updated_count = 0
         for req in processing_requests:
             if not req.book:
                 logger.warning("request_missing_book", request_id=req.id)
                 continue
-            
-            if not req.book.hardcover_id:
-                logger.warning("request_missing_hardcover_id",
-                             request_id=req.id,
-                             book_title=req.book.title)
+
+            # Look for a completed + imported DownloadTask for this book+format
+            completed_task = db.query(models.DownloadTask).filter(
+                models.DownloadTask.book_id == req.book_id,
+                models.DownloadTask.format == req.format,
+                models.DownloadTask.state == "complete",
+                models.DownloadTask.import_status == "imported",
+            ).first()
+
+            if completed_task:
+                req.status = "available"
+                req.updated_at = now
+
+                # Set per-format availability on the book
+                if req.format == "ebook":
+                    req.book.ebook_available = True
+                elif req.format == "audiobook":
+                    req.book.audiobook_available = True
+                db.add(req.book)
+
+                updated_count += 1
+                logger.info("request_marked_available",
+                          request_id=req.id,
+                          book_title=req.book.title,
+                          format=req.format,
+                          task_id=completed_task.id)
                 continue
-            
-            # Select the appropriate server based on request format
-            server = None
-            if req.format == "audiobook":
-                server = audiobook_server
-            else:  # ebook or default
-                server = ebook_server
-            
-            if not server:
-                logger.warning("no_server_for_format",
-                             request_id=req.id,
-                             format=req.format)
+
+            # No completed task — check if we should mark as not_found
+            active_task = db.query(models.DownloadTask).filter(
+                models.DownloadTask.book_id == req.book_id,
+                models.DownloadTask.format == req.format,
+                models.DownloadTask.state.notin_(["complete", "error"]),
+            ).first()
+
+            if active_task:
+                # Still downloading — leave as processing
+                logger.debug("request_still_downloading",
+                           request_id=req.id,
+                           book_title=req.book.title,
+                           task_state=active_task.state)
                 continue
-            
-            logger.debug("checking_request_in_readarr",
-                        request_id=req.id,
-                        book_title=req.book.title,
-                        format=req.format,
-                        hardcover_id=req.book.hardcover_id,
-                        server_id=server.id)
-            
-            # Check if book exists in Readarr and has files
-            readarr_client = ReadarrClient.from_server(server)
-            book_data = await readarr_client.find_book_in_library(None, req.book.hardcover_id)
+
+            # No active task — check age for not_found timeout
             last_touch = req.updated_at or req.created_at
             if last_touch and last_touch.tzinfo is None:
                 last_touch = last_touch.replace(tzinfo=timezone.utc)
-            now = datetime.now(timezone.utc)
             if last_touch is None:
                 last_touch = now
-            
-            if book_data:
-                file_count = book_data.get("statistics", {}).get("bookFileCount", 0)
-                readarr_book_id = book_data.get("id")
-                
-                if file_count > 0:
-                    # Book has files - mark as available
-                    req.status = "available"
-                    req.updated_at = now
-                    db.add(req)
-                    
-                    # Set per-format availability on the book
-                    if req.format == "ebook":
-                        req.book.ebook_available = True
-                    elif req.format == "audiobook":
-                        req.book.audiobook_available = True
-                    db.add(req.book)
-                    
-                    updated_count += 1
-                    logger.info("request_marked_available_from_readarr",
-                              request_id=req.id,
-                              book_title=req.book.title,
-                              format=req.format,
-                              hardcover_id=req.book.hardcover_id,
-                              readarr_book_id=readarr_book_id,
-                              file_count=file_count)
-                else:
-                    # If it's been processing for a while with no queue/history, mark not_found.
-                    download_status = await readarr_client.check_book_download_status(None, readarr_book_id)
-                    if (
-                        download_status.get("status") == "unknown"
-                        and (now - last_touch) >= not_found_after
-                    ):
-                        req.status = "not_found"
-                        req.updated_at = now
-                        db.add(req)
-                        updated_count += 1
-                        logger.info("request_marked_not_found",
-                                  request_id=req.id,
-                                  book_title=req.book.title,
-                                  format=req.format,
-                                  hardcover_id=req.book.hardcover_id,
-                                  readarr_book_id=readarr_book_id)
-                    else:
-                        logger.debug("book_in_readarr_no_files",
-                                   request_id=req.id,
-                                   book_title=req.book.title,
-                                   format=req.format,
-                                   readarr_book_id=readarr_book_id,
-                                   download_status=download_status.get("status"))
+
+            if (now - last_touch) >= not_found_after:
+                req.status = "not_found"
+                req.updated_at = now
+                updated_count += 1
+                logger.info("request_marked_not_found",
+                          request_id=req.id,
+                          book_title=req.book.title,
+                          format=req.format)
             else:
-                if (now - last_touch) >= not_found_after:
-                    req.status = "not_found"
-                    req.updated_at = now
-                    db.add(req)
-                    updated_count += 1
-                    logger.info("request_marked_not_found_no_readarr_book",
-                              request_id=req.id,
-                              book_title=req.book.title,
-                              format=req.format,
-                              hardcover_id=req.book.hardcover_id)
-                else:
-                    logger.debug("book_not_in_readarr",
-                               request_id=req.id,
-                               book_title=req.book.title,
-                               format=req.format,
-                               hardcover_id=req.book.hardcover_id)
-        
+                logger.debug("request_waiting",
+                           request_id=req.id,
+                           book_title=req.book.title,
+                           age_seconds=(now - last_touch).total_seconds())
+
         if updated_count > 0:
             db.commit()
             logger.info("processing_requests_updated",
@@ -1138,7 +916,7 @@ async def update_processing_requests_status(db: Session) -> None:
         else:
             logger.info("no_requests_updated",
                        total_checked=len(processing_requests))
-        
+
     except Exception as e:
         logger.error("update_processing_requests_error", error=str(e))
         import traceback

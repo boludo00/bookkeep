@@ -25,7 +25,7 @@ JOB_DEFINITIONS = {
     },
     "check_processing_requests": {
         "default_interval": 5 * 60,  # 5 minutes
-        "description": "Check Booklore for completed downloads",
+        "description": "Check download tasks for completed requests",
         "type": "PROCESS",
     },
     "sync_from_booklore": {

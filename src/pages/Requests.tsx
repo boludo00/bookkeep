@@ -232,7 +232,7 @@ export default function Requests() {
   const statusFilter = activeTab === 'all'
     ? undefined
     : activeTab === 'pending'
-    ? 'requested'
+    ? 'pending'
     : activeTab === 'approved'
     ? undefined
     : activeTab;
@@ -281,7 +281,7 @@ export default function Requests() {
 
   const filterRequests = (status: string) => {
     if (status === 'all') return transformedRequests;
-    if (status === 'pending') return transformedRequests.filter((r) => r.status === 'requested');
+    if (status === 'pending') return transformedRequests.filter((r) => r.status === 'pending');
     if (status === 'approved') return transformedRequests.filter((r) => ['approved', 'processing'].includes(r.status));
     if (status === 'available') return transformedRequests.filter((r) => r.status === 'available');
     return transformedRequests;
