@@ -181,6 +181,21 @@ async def search_releases(
             format_type=format_type
         )
 
+        # Filter releases to only include protocols with configured clients
+        available_protocols = db.query(DownloadClient.protocol).filter(
+            DownloadClient.enabled == True
+        ).distinct().all()
+        available_protocols = [p.protocol for p in available_protocols if p.protocol]
+
+        if available_protocols:
+            releases = [r for r in releases if r.protocol in available_protocols]
+
+        logger.debug(
+            "search_filtered_by_protocol",
+            available_protocols=available_protocols,
+            releases_after_filter=len(releases)
+        )
+
         # Convert to response format and check if already downloaded
         release_info = []
         for r in releases:
