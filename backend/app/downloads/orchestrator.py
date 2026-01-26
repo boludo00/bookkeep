@@ -22,7 +22,7 @@ from . import (
     list_sources,
     list_handlers,
 )
-from ..models import Book, DownloadTask, AppSettings
+from ..models import Book, DownloadTask, AppSettings, DownloadClient
 from ..database import SessionLocal
 
 logger = structlog.get_logger()
@@ -52,6 +52,42 @@ class DownloadOrchestrator:
         self.db_session = db_session
         self._active_downloads: Dict[int, Event] = {}  # task_id -> cancel_event
         self._download_threads: Dict[int, threading.Thread] = {}
+
+    def get_available_protocols(self, db: Optional[Session] = None) -> List[str]:
+        """
+        Get list of protocols that have enabled download clients configured.
+
+        Args:
+            db: Database session
+
+        Returns:
+            List of available protocols (e.g., ["torrent"], ["torrent", "usenet"])
+        """
+        session = db or self.db_session or SessionLocal()
+        close_session = db is None and self.db_session is None
+
+        try:
+            # Query distinct protocols from enabled download clients
+            enabled_clients = session.query(DownloadClient.protocol).filter(
+                DownloadClient.enabled == True
+            ).distinct().all()
+
+            protocols = [client.protocol for client in enabled_clients if client.protocol]
+
+            logger.debug(
+                "orchestrator_available_protocols",
+                protocols=protocols
+            )
+
+            return protocols
+
+        except Exception as e:
+            logger.error("orchestrator_get_protocols_failed", error=str(e))
+            # Default to torrent if we can't determine (safer fallback)
+            return ["torrent"]
+        finally:
+            if close_session:
+                session.close()
 
     def search_releases(
         self,
@@ -90,10 +126,21 @@ class DownloadOrchestrator:
                 format_type=format_type
             )
 
+            # Filter releases to only include protocols with configured clients
+            available_protocols = self.get_available_protocols(db)
+            total_before_filter = len(releases)
+
+            if available_protocols:
+                releases = [r for r in releases if r.protocol in available_protocols]
+
+            filtered_count = total_before_filter - len(releases)
+
             logger.info(
                 "orchestrator_search_complete",
                 book_id=book.id,
                 releases_found=len(releases),
+                releases_filtered=filtered_count,
+                available_protocols=available_protocols,
                 top_quality=releases[0].quality_score if releases else 0
             )
 
