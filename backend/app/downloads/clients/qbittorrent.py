@@ -162,6 +162,8 @@ class QBittorrentClient:
         password: Optional[str] = None,
         use_ssl: bool = False,
         category: Optional[str] = None,
+        ebook_category: Optional[str] = None,
+        audiobook_category: Optional[str] = None,
         path_mappings: Optional[Dict[str, str]] = None,
     ):
         """
@@ -173,7 +175,9 @@ class QBittorrentClient:
             username: Web UI username
             password: Web UI password
             use_ssl: Use HTTPS connection
-            category: Default category for downloads
+            category: Default/fallback category for downloads
+            ebook_category: Category for ebook downloads (falls back to category)
+            audiobook_category: Category for audiobook downloads (falls back to category)
             path_mappings: Docker path mappings {"container_path": "host_path"}
         """
         if not HAS_QBITTORRENT:
@@ -188,11 +192,29 @@ class QBittorrentClient:
         self.password = password
         self.use_ssl = use_ssl
         self.category = category
+        self.ebook_category = ebook_category
+        self.audiobook_category = audiobook_category
         self.path_mappings = path_mappings or {}
 
         # Initialize client
         self.client: Optional[QBClient] = None
         self._connect()
+
+    def get_category_for_format(self, format_type: Optional[str] = None) -> Optional[str]:
+        """
+        Get the appropriate category based on download format.
+
+        Args:
+            format_type: "ebook", "audiobook", or None
+
+        Returns:
+            The format-specific category, or the default category as fallback
+        """
+        if format_type == "ebook" and self.ebook_category:
+            return self.ebook_category
+        elif format_type == "audiobook" and self.audiobook_category:
+            return self.audiobook_category
+        return self.category
 
     def _connect(self):
         """Establish connection to qBittorrent"""
