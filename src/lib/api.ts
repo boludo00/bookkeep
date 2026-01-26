@@ -540,6 +540,23 @@ export const settingsApi = {
       method: 'PUT',
       body: JSON.stringify(paths),
     }),
+
+  // Cache management (admin only)
+  getCacheResources: () =>
+    apiRequest<{ resources: Array<{ key: string; name: string; description: string }> }>('/api/settings/cache/resources'),
+
+  clearCacheResource: (resource: string) =>
+    apiRequest<{ message: string; deleted_count: number }>(`/api/settings/cache/clear/${resource}`, {
+      method: 'POST',
+    }),
+
+  clearAllCache: () =>
+    apiRequest<{ message: string; total_deleted: number; by_resource: Record<string, number> }>('/api/settings/cache/clear-all', {
+      method: 'POST',
+    }),
+
+  debugCacheKeys: () =>
+    apiRequest<{ total_keys: number; sample_keys: string[]; namespace: string }>('/api/settings/cache/debug'),
 };
 
 // Readarr API endpoints
@@ -728,6 +745,15 @@ export interface ProwlarrServer {
   url_base: string | null;
   enabled: boolean;
   is_default: boolean;
+  indexer_ids: number[] | null;
+}
+
+export interface ProwlarrIndexer {
+  id: number;
+  name: string;
+  protocol: string;
+  privacy: string;
+  enabled: boolean;
 }
 
 export interface DownloadClient {
@@ -740,6 +766,7 @@ export interface DownloadClient {
   use_ssl: boolean;
   username: string | null;
   password: string;
+  api_key: string | null;
   enabled: boolean;
   priority: number;
   category: string | null;
@@ -767,13 +794,13 @@ export const downloadSettingsApi = {
   getProwlarrServers: () =>
     apiRequest<Array<ProwlarrServer>>('/api/download-settings/prowlarr'),
 
-  createProwlarrServer: (server: { name: string; host: string; port?: number; use_ssl?: boolean; api_key: string; url_base?: string; enabled?: boolean; is_default?: boolean }) =>
+  createProwlarrServer: (server: { name: string; host: string; port?: number; use_ssl?: boolean; api_key: string; url_base?: string; enabled?: boolean; is_default?: boolean; indexer_ids?: number[] }) =>
     apiRequest<ProwlarrServer>('/api/download-settings/prowlarr', {
       method: 'POST',
       body: JSON.stringify(server),
     }),
 
-  updateProwlarrServer: (id: number, server: { name?: string; host?: string; port?: number; use_ssl?: boolean; api_key?: string; url_base?: string; enabled?: boolean; is_default?: boolean }) =>
+  updateProwlarrServer: (id: number, server: { name?: string; host?: string; port?: number; use_ssl?: boolean; api_key?: string; url_base?: string; enabled?: boolean; is_default?: boolean; indexer_ids?: number[] }) =>
     apiRequest<ProwlarrServer>(`/api/download-settings/prowlarr/${id}`, {
       method: 'PUT',
       body: JSON.stringify(server),
@@ -790,17 +817,20 @@ export const downloadSettingsApi = {
       body: JSON.stringify(config),
     }),
 
+  getProwlarrIndexers: (serverId: number) =>
+    apiRequest<{ indexers: ProwlarrIndexer[] }>(`/api/download-settings/prowlarr/${serverId}/indexers`),
+
   // Download Client endpoints
   getDownloadClients: () =>
     apiRequest<Array<DownloadClient>>('/api/download-settings/download-clients'),
 
-  createDownloadClient: (client: { name: string; type: string; protocol: string; host: string; port: number; use_ssl?: boolean; username?: string; password?: string; enabled?: boolean; priority?: number; category?: string; ebook_category?: string; audiobook_category?: string; path_mappings_json?: string }) =>
+  createDownloadClient: (client: { name: string; type: string; protocol: string; host: string; port: number; use_ssl?: boolean; username?: string; password?: string; api_key?: string; enabled?: boolean; priority?: number; category?: string; ebook_category?: string; audiobook_category?: string; path_mappings_json?: string }) =>
     apiRequest<DownloadClient>('/api/download-settings/download-clients', {
       method: 'POST',
       body: JSON.stringify(client),
     }),
 
-  updateDownloadClient: (id: number, client: { name?: string; type?: string; protocol?: string; host?: string; port?: number; use_ssl?: boolean; username?: string; password?: string; enabled?: boolean; priority?: number; category?: string; ebook_category?: string; audiobook_category?: string; path_mappings_json?: string }) =>
+  updateDownloadClient: (id: number, client: { name?: string; type?: string; protocol?: string; host?: string; port?: number; use_ssl?: boolean; username?: string; password?: string; api_key?: string; enabled?: boolean; priority?: number; category?: string; ebook_category?: string; audiobook_category?: string; path_mappings_json?: string }) =>
     apiRequest<DownloadClient>(`/api/download-settings/download-clients/${id}`, {
       method: 'PUT',
       body: JSON.stringify(client),

@@ -129,6 +129,7 @@ class BookRequestResponse(BaseModel):
     source: Optional[str] = "user_request"  # 'user_request' or 'booklore_import'
     notes: Optional[str] = None
     admin_notes: Optional[str] = None
+    # Deprecated: Readarr fields kept for backward compatibility
     readarr_book_id: Optional[int] = None
     readarr_received: Optional[bool] = None
     readarr_search_triggered: Optional[bool] = None
@@ -166,6 +167,7 @@ class HardcoverCachedContributor(BaseModel):
     contribution: Optional[str] = None
 
 class HardcoverContribution(BaseModel):
+    contribution: Optional[str] = None
     author: HardcoverAuthor
 
 class HardcoverSeries(BaseModel):

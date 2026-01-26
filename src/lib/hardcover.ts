@@ -23,6 +23,7 @@ export interface HardcoverBook {
     series: { id: number; name: string; primary_books_count?: number | null };
   }>;
   contributions?: Array<{
+    contribution?: string | null;
     author: { id: number; name: string; slug: string };
   }>;
   taggings?: Array<{ tag: { tag: string } }>;
@@ -110,9 +111,27 @@ export async function getPopularSeries(
 
 // Helper to transform Hardcover book to our app's Book format
 export function transformHardcoverBook(hcBook: HardcoverBook) {
-  const authors = hcBook.contributions?.map(c => c.author.name) || 
-    hcBook.cached_contributors?.map((c: any) => c.author?.name || c.name).filter(Boolean) || 
-    [];
+  // Get authors from contributions, filtering by role if multiple contributors
+  let authors: string[] = [];
+  if (hcBook.contributions && hcBook.contributions.length > 0) {
+    if (hcBook.contributions.length === 1) {
+      // Single contributor - use them regardless of role
+      authors = [hcBook.contributions[0].author.name];
+    } else {
+      // Multiple contributors - filter to only "Author" role (or null, which often means author)
+      const authorContributions = hcBook.contributions.filter(
+        c => !c.contribution || c.contribution === "Author"
+      );
+      authors = authorContributions.length > 0
+        ? authorContributions.map(c => c.author.name)
+        : hcBook.contributions.map(c => c.author.name); // Fallback to all if no "Author" found
+    }
+  } else if (hcBook.cached_contributors) {
+    // Fallback to cached_contributors
+    authors = hcBook.cached_contributors
+      .map((c: any) => c.author?.name || c.name)
+      .filter(Boolean);
+  }
   
   const series = hcBook.book_series?.[0];
   const genres = hcBook.taggings?.map(t => t.tag.tag) || [];

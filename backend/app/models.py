@@ -92,16 +92,17 @@ class BookRequest(Base):
     book_id = Column(Integer, ForeignKey("books.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     format = Column(String, nullable=False)  # 'ebook', 'audiobook'
-    status = Column(String, default='requested')  # 'requested', 'approved', 'denied', 'processing', 'available'
+    status = Column(String, default='pending')  # 'pending', 'approved', 'denied', 'processing', 'available'
     source = Column(String, default='user_request')  # 'user_request' or 'booklore_import'
     notes = Column(Text, nullable=True)
     admin_notes = Column(Text, nullable=True)
-    readarr_book_id = Column(Integer, nullable=True, index=True)  # Readarr's internal book ID for status tracking
+    # Deprecated: Readarr fields kept for backward compatibility / migration
+    readarr_book_id = Column(Integer, nullable=True, index=True)
     edition_id = Column(Integer, nullable=True)  # Hardcover edition id selected for request
-    readarr_received = Column(Boolean, default=False, nullable=False)  # Whether Readarr acknowledged receiving the book
-    readarr_search_triggered = Column(Boolean, nullable=True)  # Whether search was triggered (True/False/None if unknown)
-    readarr_search_status_code = Column(Integer, nullable=True)  # HTTP status code from search command
-    readarr_message = Column(Text, nullable=True)  # Status/error message from Readarr
+    readarr_received = Column(Boolean, default=False, nullable=False)  # Deprecated
+    readarr_search_triggered = Column(Boolean, nullable=True)  # Deprecated
+    readarr_search_status_code = Column(Integer, nullable=True)  # Deprecated
+    readarr_message = Column(Text, nullable=True)  # Deprecated
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -188,6 +189,7 @@ class DownloadClient(Base):
     use_ssl = Column(Boolean, default=False)
     username = Column(String, nullable=True)
     password = Column(String, nullable=True)  # TODO: Encrypt this
+    api_key = Column(String, nullable=True)  # API key for SABnzbd and similar clients
 
     # Configuration
     enabled = Column(Boolean, default=True)
@@ -221,6 +223,9 @@ class ProwlarrServer(Base):
     # Configuration
     enabled = Column(Boolean, default=True)
     is_default = Column(Boolean, default=False)
+
+    # Indexer filtering - JSON list of allowed indexer IDs (empty/null = all indexers)
+    indexer_ids_json = Column(Text, nullable=True)
 
     # Metadata
     created_at = Column(DateTime(timezone=True), server_default=func.now())

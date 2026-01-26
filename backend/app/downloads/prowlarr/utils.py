@@ -333,34 +333,69 @@ def build_search_queries(
         List of search queries to try
 
     Examples:
-        >>> build_search_queries("The Great Book", "John Doe", "1234567890")
-        ['1234567890', 'The Great Book John Doe', 'The Great Book', 'Great Book']
+        >>> build_search_queries("The Great Book: A Subtitle", "John Doe", "1234567890")
+        ['1234567890', 'The Great Book: A Subtitle John Doe', 'The Great Book: A Subtitle',
+         'Great Book: A Subtitle', 'The Great Book John Doe', 'The Great Book']
     """
     queries = []
+    seen = set()  # Track unique queries to avoid duplicates
+
+    def add_query(q: str):
+        """Add query if not already seen"""
+        q = q.strip()
+        if q and q not in seen:
+            seen.add(q)
+            queries.append(q)
 
     # ISBN is most specific - try first if available
     if isbn:
-        queries.append(isbn)
+        add_query(isbn)
 
-    # Title + Author
+    # Title + Author (full title)
     if title and author:
-        queries.append(f"{title} {author}")
+        add_query(f"{title} {author}")
 
-    # Just title
+    # Just title (full)
     if title:
-        queries.append(title)
+        add_query(title)
 
     # Title variants (if enabled)
     if include_variants and title:
         # Remove "The", "A", "An" from beginning
         title_no_article = re.sub(r"^(The|A|An)\s+", "", title, flags=re.IGNORECASE)
         if title_no_article != title:
-            queries.append(title_no_article)
+            add_query(title_no_article)
 
-        # Remove subtitle (after colon or dash)
-        title_no_subtitle = re.split(r"\s*[:\-–]\s*", title)[0]
-        if title_no_subtitle != title:
-            queries.append(title_no_subtitle)
+        # Split by colon or dash to get parts
+        # "Mistborn: The Final Empire" -> ["Mistborn", "The Final Empire"]
+        title_parts = re.split(r"\s*[:\-–]\s*", title)
+
+        if len(title_parts) > 1:
+            # Get the main part (before colon) - usually series name
+            main_part = title_parts[0].strip()
+            # Get the subtitle (after colon) - often the actual book name
+            subtitle = title_parts[1].strip()
+
+            # Try subtitle + author first - releases often use just the book name
+            # e.g., "The Final Empire Brandon Sanderson"
+            if subtitle and author:
+                add_query(f"{subtitle} {author}")
+            if subtitle:
+                add_query(subtitle)
+
+            # Try subtitle without article
+            subtitle_no_article = re.sub(r"^(The|A|An)\s+", "", subtitle, flags=re.IGNORECASE)
+            if subtitle_no_article and subtitle_no_article != subtitle:
+                if author:
+                    add_query(f"{subtitle_no_article} {author}")
+                add_query(subtitle_no_article)
+
+            # Try main part (series name) + author
+            # e.g., "Mistborn Brandon Sanderson"
+            if main_part and main_part != title:
+                if author:
+                    add_query(f"{main_part} {author}")
+                add_query(main_part)
 
     return queries
 

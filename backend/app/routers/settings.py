@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from app.database import get_db
-from app import schemas
+from app import schemas, models, cache
 from app.models import AppSettings
+from app.auth import require_admin
 import os
 
 router = APIRouter()
@@ -127,4 +128,111 @@ async def update_download_paths(
         set_setting_value(db, "audiobook_download_path", update.audiobook_download_path)
 
     return {"message": "Download paths updated successfully"}
+
+
+# Cache Management (Admin only)
+
+class CacheResourceInfo(BaseModel):
+    key: str
+    name: str
+    description: str
+
+class CacheResourcesResponse(BaseModel):
+    resources: List[CacheResourceInfo]
+
+class CacheClearResponse(BaseModel):
+    message: str
+    deleted_count: int
+
+class CacheClearAllResponse(BaseModel):
+    message: str
+    total_deleted: int
+    by_resource: dict
+
+@router.get("/cache/resources", response_model=CacheResourcesResponse)
+async def get_cache_resources(
+    current_user: models.User = Depends(require_admin)
+):
+    """Get list of cache resources that can be cleared (admin only)"""
+    resources = [
+        CacheResourceInfo(
+            key=key,
+            name=info["name"],
+            description=info["description"]
+        )
+        for key, info in cache.CACHE_RESOURCES.items()
+    ]
+    return CacheResourcesResponse(resources=resources)
+
+@router.post("/cache/clear/{resource}", response_model=CacheClearResponse)
+async def clear_cache_resource(
+    resource: str,
+    current_user: models.User = Depends(require_admin)
+):
+    """Clear cache for a specific resource (admin only)"""
+    try:
+        result = await cache.clear_cache_by_resource(resource)
+        return CacheClearResponse(
+            message=f"Cleared {result['name']} cache",
+            deleted_count=result["deleted_count"]
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/cache/clear-all", response_model=CacheClearAllResponse)
+async def clear_all_cache(
+    current_user: models.User = Depends(require_admin)
+):
+    """Clear all cache entries (admin only)"""
+    result = await cache.clear_all_cache()
+    return CacheClearAllResponse(
+        message="All cache cleared",
+        total_deleted=result["total_deleted"],
+        by_resource=result["by_resource"]
+    )
+
+
+class CacheDebugResponse(BaseModel):
+    total_keys: int
+    sample_keys: List[str]
+    namespace: str
+
+
+@router.get("/cache/debug", response_model=CacheDebugResponse)
+async def debug_cache_keys(
+    current_user: models.User = Depends(require_admin)
+):
+    """Debug endpoint to list cache keys (admin only)"""
+    import os
+    redis_url = os.getenv("REDIS_URL", "")
+
+    if not redis_url:
+        return CacheDebugResponse(total_keys=0, sample_keys=[], namespace="no_redis")
+
+    try:
+        import redis.asyncio as aioredis
+        redis_client = aioredis.from_url(redis_url, decode_responses=True)
+
+        # Scan all keys
+        all_keys = []
+        cursor = 0
+        while True:
+            cursor, keys = await redis_client.scan(cursor, match="*", count=100)
+            all_keys.extend(keys)
+            if cursor == 0:
+                break
+
+        await redis_client.aclose()
+
+        return CacheDebugResponse(
+            total_keys=len(all_keys),
+            sample_keys=all_keys[:50],  # Return first 50 keys
+            namespace="bookkeep"
+        )
+    except Exception as e:
+        return CacheDebugResponse(
+            total_keys=0,
+            sample_keys=[f"error: {str(e)}"],
+            namespace="error"
+        )
 

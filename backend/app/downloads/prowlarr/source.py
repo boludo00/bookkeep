@@ -31,7 +31,8 @@ class ProwlarrSource(ReleaseSource):
         self,
         base_url: Optional[str] = None,
         api_key: Optional[str] = None,
-        timeout: int = 30
+        timeout: int = 30,
+        indexer_ids: Optional[List[int]] = None
     ):
         """
         Initialize Prowlarr source.
@@ -40,6 +41,7 @@ class ProwlarrSource(ReleaseSource):
             base_url: Prowlarr base URL (if None, reads from env/config)
             api_key: Prowlarr API key (if None, reads from env/config)
             timeout: Request timeout in seconds
+            indexer_ids: List of indexer IDs to search (None = all indexers)
         """
         # TODO: Read from database settings if not provided
         if base_url is None:
@@ -50,6 +52,7 @@ class ProwlarrSource(ReleaseSource):
             api_key = os.getenv("PROWLARR_API_KEY", "")
 
         self.client = ProwlarrClient(base_url, api_key, timeout)
+        self.indexer_ids = indexer_ids
 
     @property
     def name(self) -> str:
@@ -94,25 +97,38 @@ class ProwlarrSource(ReleaseSource):
         queries = build_search_queries(title, author, isbn)
 
         all_results = []
-        for query in queries:
+        seen_urls = set()  # Track unique results by download URL
+
+        # Try multiple queries to find more results
+        # Limit to first 4 queries to avoid excessive API calls
+        for query in queries[:4]:
             logger.info(
                 "prowlarr_search",
                 query=query,
                 format_type=format_type,
-                categories=categories
+                categories=categories,
+                indexer_ids=self.indexer_ids
             )
 
             # Search with auto-retry (will try without categories if no results)
             results = self.client.search_with_retry(
                 query=query,
                 categories=categories,
+                indexer_ids=self.indexer_ids,
                 limit=100
             )
 
             if results:
-                all_results.extend(results)
-                # If we got results, don't try more queries
-                break
+                # Add only unique results (by download URL)
+                for result in results:
+                    url = result.get("downloadUrl", "")
+                    if url and url not in seen_urls:
+                        seen_urls.add(url)
+                        all_results.append(result)
+
+                # Stop if we have enough results
+                if len(all_results) >= 50:
+                    break
 
         if not all_results:
             logger.info(
@@ -124,10 +140,10 @@ class ProwlarrSource(ReleaseSource):
             )
             return []
 
-        # Convert to Release objects
+        # Convert to Release objects with author validation
         releases = []
         for result in all_results:
-            release = self._convert_to_release(result, format_type)
+            release = self._convert_to_release(result, format_type, author)
             if release:
                 releases.append(release)
 
@@ -146,7 +162,8 @@ class ProwlarrSource(ReleaseSource):
     def _convert_to_release(
         self,
         prowlarr_result: dict,
-        format_type: str
+        format_type: str,
+        expected_author: Optional[str] = None
     ) -> Optional[Release]:
         """
         Convert Prowlarr result to Release object.
@@ -154,6 +171,7 @@ class ProwlarrSource(ReleaseSource):
         Args:
             prowlarr_result: Raw result from Prowlarr
             format_type: Expected format type ("ebook" or "audiobook")
+            expected_author: Expected author name for validation (optional)
 
         Returns:
             Release object or None if invalid
@@ -164,6 +182,15 @@ class ProwlarrSource(ReleaseSource):
 
         download_url = prowlarr_result.get("downloadUrl", "")
         if not download_url:
+            return None
+
+        # Validate author if provided - helps ensure results match the intended book
+        if expected_author and not self._author_matches(title, expected_author):
+            logger.debug(
+                "prowlarr_author_mismatch",
+                release_title=title[:100],
+                expected_author=expected_author
+            )
             return None
 
         # Parse Prowlarr result
@@ -218,6 +245,62 @@ class ProwlarrSource(ReleaseSource):
         )
 
         return release
+
+    def _author_matches(self, title: str, expected_author: str) -> bool:
+        """
+        Check if expected author name appears in the release title.
+
+        Uses fuzzy matching to handle variations like:
+        - "Brandon Sanderson" vs "Sanderson, Brandon"
+        - "J.R.R. Tolkien" vs "JRR Tolkien" vs "Tolkien"
+
+        Args:
+            title: Release title to check
+            expected_author: Expected author name
+
+        Returns:
+            True if author appears to match, False otherwise
+        """
+        if not expected_author:
+            return True  # No author to validate against
+
+        title_lower = title.lower()
+        author_lower = expected_author.lower()
+
+        # Direct match
+        if author_lower in title_lower:
+            return True
+
+        # Split author into parts and check for last name
+        author_parts = author_lower.replace(",", " ").replace(".", " ").split()
+        author_parts = [p.strip() for p in author_parts if p.strip() and len(p.strip()) > 1]
+
+        if not author_parts:
+            return True  # Can't validate, allow it
+
+        # Check if last name appears (usually most distinctive)
+        # Handle "First Last" and "Last, First" formats
+        last_name = author_parts[-1] if len(author_parts) > 1 else author_parts[0]
+
+        # For names like "J.R.R. Tolkien", last name is "tolkien"
+        # For names like "Sanderson, Brandon", last name after split is "brandon" but we want "sanderson"
+        # So also check the first part if it's longer (likely the surname)
+        first_part = author_parts[0]
+
+        # Use the longer part as likely surname (handles "Sanderson, Brandon" -> "sanderson")
+        likely_surname = last_name if len(last_name) >= len(first_part) else first_part
+
+        # Check if likely surname appears in title
+        if likely_surname in title_lower:
+            return True
+
+        # Check if any substantial part of author name appears
+        # (at least 4 chars to avoid false positives like "an", "the")
+        for part in author_parts:
+            if len(part) >= 4 and part in title_lower:
+                return True
+
+        return False
 
     def search_by_isbn(self, isbn: str, format_type: str = "ebook") -> List[Release]:
         """

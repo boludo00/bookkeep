@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { downloadSettingsApi, type ProwlarrServer } from '@/lib/api';
+import { downloadSettingsApi, type ProwlarrServer, type ProwlarrIndexer } from '@/lib/api';
 
 interface ProwlarrForm {
   name: string;
@@ -26,6 +26,7 @@ interface ProwlarrForm {
   url_base: string;
   enabled: boolean;
   is_default: boolean;
+  indexer_ids: number[];
 }
 
 export default function ProwlarrSettings() {
@@ -34,6 +35,7 @@ export default function ProwlarrSettings() {
   const [showApiKey, setShowApiKey] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; indexers?: any[]; total_indexers?: number; error?: string } | null>(null);
+  const [availableIndexers, setAvailableIndexers] = useState<ProwlarrIndexer[]>([]);
 
   const [form, setForm] = useState<ProwlarrForm>({
     name: '',
@@ -44,6 +46,7 @@ export default function ProwlarrSettings() {
     url_base: '',
     enabled: true,
     is_default: false,
+    indexer_ids: [],
   });
 
   const queryClient = useQueryClient();
@@ -100,9 +103,11 @@ export default function ProwlarrSettings() {
       url_base: '',
       enabled: true,
       is_default: false,
+      indexer_ids: [],
     });
     setEditingServer(null);
     setTestResult(null);
+    setAvailableIndexers([]);
   };
 
   const handleAdd = () => {
@@ -110,19 +115,48 @@ export default function ProwlarrSettings() {
     setShowModal(true);
   };
 
-  const handleEdit = (server: ProwlarrServer) => {
+  const handleEdit = async (server: ProwlarrServer) => {
     setEditingServer(server);
-    setForm({
-      name: server.name,
-      host: server.host,
-      port: server.port,
-      use_ssl: server.use_ssl,
-      api_key: server.api_key,
-      url_base: server.url_base || '',
-      enabled: server.enabled,
-      is_default: server.is_default,
-    });
     setShowModal(true);
+
+    // Load available indexers for this server
+    try {
+      const result = await downloadSettingsApi.getProwlarrIndexers(server.id);
+      const indexers = result.indexers || [];
+      setAvailableIndexers(indexers);
+
+      // If no indexers were previously saved, select all by default
+      const savedIndexerIds = server.indexer_ids || [];
+      const indexerIds = savedIndexerIds.length > 0
+        ? savedIndexerIds
+        : indexers.map((idx: ProwlarrIndexer) => idx.id);
+
+      setForm({
+        name: server.name,
+        host: server.host,
+        port: server.port,
+        use_ssl: server.use_ssl,
+        api_key: server.api_key,
+        url_base: server.url_base || '',
+        enabled: server.enabled,
+        is_default: server.is_default,
+        indexer_ids: indexerIds,
+      });
+    } catch (error) {
+      console.error('Failed to load indexers:', error);
+      // Still set the form even if indexers fail to load
+      setForm({
+        name: server.name,
+        host: server.host,
+        port: server.port,
+        use_ssl: server.use_ssl,
+        api_key: server.api_key,
+        url_base: server.url_base || '',
+        enabled: server.enabled,
+        is_default: server.is_default,
+        indexer_ids: server.indexer_ids || [],
+      });
+    }
   };
 
   const handleTestConnection = async () => {
@@ -142,6 +176,22 @@ export default function ProwlarrSettings() {
 
       if (result.success) {
         toast.success('Connection successful!');
+        // Store the full indexer data for selection
+        if (result.indexers) {
+          const indexers = result.indexers.map((idx: any) => ({
+            id: idx.id,
+            name: idx.name,
+            protocol: idx.protocol,
+            privacy: idx.privacy,
+            enabled: idx.enable !== false,
+          }));
+          setAvailableIndexers(indexers);
+          // Auto-check all indexers by default
+          setForm(prev => ({
+            ...prev,
+            indexer_ids: indexers.map((idx: ProwlarrIndexer) => idx.id),
+          }));
+        }
       } else {
         toast.error('Connection failed', {
           description: result.error,
@@ -160,6 +210,11 @@ export default function ProwlarrSettings() {
   const handleSave = () => {
     if (!form.name || !form.host || !form.api_key) {
       toast.error('Please fill in all required fields');
+      return;
+    }
+
+    if (availableIndexers.length > 0 && form.indexer_ids.length === 0) {
+      toast.error('Please select at least one indexer');
       return;
     }
 
@@ -190,6 +245,11 @@ export default function ProwlarrSettings() {
                   )}
                   {!server.enabled && (
                     <Badge variant="outline" className="text-xs">Disabled</Badge>
+                  )}
+                  {server.indexer_ids && server.indexer_ids.length > 0 && (
+                    <Badge variant="outline" className="text-xs">
+                      {server.indexer_ids.length} indexer{server.indexer_ids.length !== 1 ? 's' : ''}
+                    </Badge>
                   )}
                 </div>
                 <p className="text-sm text-muted-foreground">
@@ -376,6 +436,54 @@ export default function ProwlarrSettings() {
                       ? `Connected! Found ${testResult.total_indexers || 0} indexers`
                       : testResult.error}
                   </span>
+                </div>
+              </div>
+            )}
+
+            {/* Indexer Selection - shown after successful test or when editing */}
+            {availableIndexers.length > 0 && (
+              <div className="space-y-3 p-4 border border-border rounded-lg bg-secondary/30">
+                <div className="flex items-center justify-between">
+                  <Label className="text-foreground font-medium">Indexers to Search</Label>
+                  <span className="text-xs text-muted-foreground">
+                    {form.indexer_ids.length === 0
+                      ? 'All indexers'
+                      : `${form.indexer_ids.length} selected`}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Select which indexers to use for book searches. Only checked indexers will be searched.
+                </p>
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {availableIndexers.map((indexer) => (
+                    <div key={indexer.id} className="flex items-center space-x-2">
+                      <Checkbox
+                        id={`indexer-${indexer.id}`}
+                        checked={form.indexer_ids.includes(indexer.id)}
+                        onCheckedChange={(checked) => {
+                          if (checked) {
+                            setForm({ ...form, indexer_ids: [...form.indexer_ids, indexer.id] });
+                          } else {
+                            setForm({ ...form, indexer_ids: form.indexer_ids.filter(id => id !== indexer.id) });
+                          }
+                        }}
+                      />
+                      <Label
+                        htmlFor={`indexer-${indexer.id}`}
+                        className="font-normal cursor-pointer flex items-center gap-2"
+                      >
+                        <span>{indexer.name}</span>
+                        <Badge variant="outline" className="text-xs">
+                          {indexer.protocol}
+                        </Badge>
+                        {!indexer.enabled && (
+                          <Badge variant="secondary" className="text-xs">
+                            Disabled
+                          </Badge>
+                        )}
+                      </Label>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}

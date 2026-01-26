@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Check, X, MessageSquare } from 'lucide-react';
+import { Check, X, MessageSquare, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -36,9 +36,6 @@ export default function Admin() {
   const updateRequestMutation = useMutation({
     mutationFn: ({ id, update }: { id: number; update: { status?: string; admin_notes?: string } }) =>
       requestsApi.update(id, update),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['requests'] });
-    },
   });
 
   // Filter out requests without books to prevent UI issues
@@ -72,25 +69,49 @@ export default function Admin() {
       createdAt: req.created_at,
       updatedAt: req.updated_at,
     }));
+  const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [approvedIds, setApprovedIds] = useState<Set<string>>(new Set());
   const [noteDialog, setNoteDialog] = useState<{ open: boolean; request: BookRequest | null }>({
     open: false,
     request: null,
   });
   const [adminNote, setAdminNote] = useState('');
 
-  const pendingRequests = requests.filter((r) => r.status === 'requested');
-  const processedRequests = requests.filter((r) => r.status !== 'requested');
+  const pendingRequests = requests.filter((r) => r.status === 'pending');
+  const processedRequests = requests.filter((r) => r.status !== 'pending');
+
+  const isToday = (dateStr: string | undefined) => {
+    if (!dateStr) return false;
+    const date = new Date(dateStr);
+    const now = new Date();
+    return date.getFullYear() === now.getFullYear()
+      && date.getMonth() === now.getMonth()
+      && date.getDate() === now.getDate();
+  };
 
   const handleApprove = (id: string) => {
+    setApprovingId(id);
     updateRequestMutation.mutate(
       { id: Number(id), update: { status: 'approved' } },
       {
         onSuccess: () => {
+          setApprovingId(null);
+          setApprovedIds((prev) => new Set(prev).add(id));
           toast.success('Request approved', {
-            description: 'The request will be sent to Readarr for processing.',
+            description: 'Searching for the best release to download.',
           });
+          // Brief delay so the user sees the checkmark before the row disappears
+          setTimeout(() => {
+            setApprovedIds((prev) => {
+              const next = new Set(prev);
+              next.delete(id);
+              return next;
+            });
+            queryClient.invalidateQueries({ queryKey: ['requests'] });
+          }, 800);
         },
         onError: () => {
+          setApprovingId(null);
           toast.error('Failed to approve request');
         },
       }
@@ -103,6 +124,7 @@ export default function Admin() {
       {
         onSuccess: () => {
           toast.info('Request denied');
+          queryClient.invalidateQueries({ queryKey: ['requests'] });
         },
         onError: () => {
           toast.error('Failed to deny request');
@@ -120,6 +142,7 @@ export default function Admin() {
             toast.success('Note added');
             setNoteDialog({ open: false, request: null });
             setAdminNote('');
+            queryClient.invalidateQueries({ queryKey: ['requests'] });
           },
           onError: () => {
             toast.error('Failed to add note');
@@ -147,7 +170,9 @@ export default function Admin() {
         <div className="p-4 rounded-lg bg-card border border-border">
           <p className="text-sm text-muted-foreground">Approved Today</p>
           <p className="text-3xl font-bold text-primary mt-1">
-            {requests.filter((r) => r.status === 'approved').length}
+            {requests.filter((r) =>
+              ['approved', 'processing', 'available'].includes(r.status) && isToday(r.updatedAt)
+            ).length}
           </p>
         </div>
         <div className="p-4 rounded-lg bg-card border border-border">
@@ -229,10 +254,21 @@ export default function Admin() {
                         </Button>
                         <Button
                           size="sm"
-                          className="bg-success hover:bg-success/90"
+                          className={
+                            approvedIds.has(request.id)
+                              ? 'bg-success hover:bg-success/90 scale-110 transition-transform duration-200'
+                              : 'bg-success hover:bg-success/90'
+                          }
                           onClick={() => handleApprove(request.id)}
+                          disabled={approvingId === request.id || approvedIds.has(request.id)}
                         >
-                          <Check className="h-4 w-4" />
+                          {approvingId === request.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : approvedIds.has(request.id) ? (
+                            <Check className="h-4 w-4 animate-in zoom-in-50 duration-200" />
+                          ) : (
+                            <Check className="h-4 w-4" />
+                          )}
                         </Button>
                       </div>
                     </TableCell>

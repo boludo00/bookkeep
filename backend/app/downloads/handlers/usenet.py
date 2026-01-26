@@ -98,10 +98,12 @@ class UsenetHandler(DownloadHandler):
 
                     # Initialize appropriate client based on type
                     if client_type == "sabnzbd":
+                        # Use api_key column, fall back to password for backward compat
+                        api_key = client_config.api_key or client_config.password
                         client = SabnzbdClient(
                             host=client_config.host,
                             port=client_config.port,
-                            api_key=client_config.api_key,
+                            api_key=api_key,
                             use_ssl=client_config.use_ssl,
                             category=client_config.category,
                             path_mappings=path_mappings,

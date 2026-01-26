@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Save, TestTube, CheckCircle, XCircle, Eye, EyeOff, Lock, Plus, Edit, Trash2, RefreshCw, Play, Clock } from 'lucide-react';
+import { Save, TestTube, CheckCircle, XCircle, Eye, EyeOff, Lock, Plus, Edit, Trash2, RefreshCw, Play, Clock, Database } from 'lucide-react';
 import ProwlarrSettings from '@/components/settings/ProwlarrSettings';
 import DownloadClientsSettings from '@/components/settings/DownloadClientsSettings';
 import { Button } from '@/components/ui/button';
@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
+import { useUser } from '@/contexts/UserContext';
 import {
   Dialog,
   DialogContent,
@@ -139,10 +140,12 @@ function Countdown({ nextExecution }: { nextExecution: string | null }) {
 }
 
 export default function Settings() {
+  const { isAdmin } = useUser();
   const [showHardcoverToken, setShowHardcoverToken] = useState(false);
   const [hardcoverToken, setHardcoverToken] = useState('');
   const [ebookDownloadPath, setEbookDownloadPath] = useState('');
   const [audiobookDownloadPath, setAudiobookDownloadPath] = useState('');
+  const [clearingCache, setClearingCache] = useState<string | null>(null);
   const [showServerModal, setShowServerModal] = useState(false);
   const [editingServer, setEditingServer] = useState<ReadarrServer | null>(null);
   const [showApiKey, setShowApiKey] = useState(false);
@@ -243,6 +246,13 @@ export default function Settings() {
   const { data: intervalOptions = [] } = useQuery<IntervalOption[], Error>({
     queryKey: ['job-intervals'],
     queryFn: () => jobsApi.getIntervals(),
+  });
+
+  // Fetch cache resources (admin only)
+  const { data: cacheResources } = useQuery({
+    queryKey: ['cache-resources'],
+    queryFn: () => settingsApi.getCacheResources(),
+    enabled: isAdmin,
   });
 
   // Update token state when backend status loads
@@ -476,12 +486,62 @@ export default function Settings() {
   const formatInterval = (seconds: number): string => {
     const option = intervalOptions.find(opt => opt.value === seconds);
     if (option) return option.label;
-    
+
     // Fallback formatting
     if (seconds < 60) return `${seconds} seconds`;
     if (seconds < 3600) return `${Math.floor(seconds / 60)} minutes`;
     if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours`;
     return `${Math.floor(seconds / 86400)} days`;
+  };
+
+  // Cache clear handlers
+  const handleClearCache = async (resource: string) => {
+    setClearingCache(resource);
+    try {
+      const result = await settingsApi.clearCacheResource(resource);
+      toast.success(result.message, {
+        description: `Cleared ${result.deleted_count} cached entries`,
+      });
+    } catch (error: any) {
+      toast.error('Failed to clear cache', {
+        description: error.message,
+      });
+    } finally {
+      setClearingCache(null);
+    }
+  };
+
+  const handleClearAllCache = async () => {
+    setClearingCache('all');
+    try {
+      const result = await settingsApi.clearAllCache();
+      toast.success(result.message, {
+        description: `Cleared ${result.total_deleted} total cached entries`,
+      });
+    } catch (error: any) {
+      toast.error('Failed to clear cache', {
+        description: error.message,
+      });
+    } finally {
+      setClearingCache(null);
+    }
+  };
+
+  const handleDebugCache = async () => {
+    try {
+      const result = await settingsApi.debugCacheKeys();
+      console.log('Cache debug result:', result);
+      toast.info(`Cache has ${result.total_keys} keys`, {
+        description: result.sample_keys.length > 0
+          ? `Sample: ${result.sample_keys.slice(0, 5).join(', ')}...`
+          : 'No keys found in cache',
+        duration: 10000,
+      });
+    } catch (error: any) {
+      toast.error('Failed to debug cache', {
+        description: error.message,
+      });
+    }
   };
 
   // Booklore mutations
@@ -1177,6 +1237,89 @@ export default function Settings() {
               </TableBody>
             </Table>
           </div>
+
+          {/* Cache Management (Admin Only) */}
+          {isAdmin && cacheResources && (
+            <Card className="bg-card border-border mt-6">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-foreground flex items-center gap-2">
+                      <Database className="h-5 w-5" />
+                      Cache Management
+                    </CardTitle>
+                    <CardDescription>
+                      Clear cached data to force fresh fetches from external APIs
+                    </CardDescription>
+                  </div>
+                  <Badge variant="secondary" className="flex items-center gap-1">
+                    <Lock className="h-3 w-3" />
+                    Admin Only
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-3">
+                  {cacheResources.resources.map((resource) => (
+                    <div
+                      key={resource.key}
+                      className="flex items-center justify-between p-3 border border-border rounded-lg bg-secondary/30"
+                    >
+                      <div>
+                        <p className="font-medium text-foreground">{resource.name}</p>
+                        <p className="text-sm text-muted-foreground">{resource.description}</p>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleClearCache(resource.key)}
+                        disabled={clearingCache !== null}
+                      >
+                        {clearingCache === resource.key ? (
+                          <>
+                            <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                            Clearing...
+                          </>
+                        ) : (
+                          <>
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Clear
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+                <div className="pt-4 border-t border-border flex gap-2">
+                  <Button
+                    variant="destructive"
+                    onClick={handleClearAllCache}
+                    disabled={clearingCache !== null}
+                    className="flex-1"
+                  >
+                    {clearingCache === 'all' ? (
+                      <>
+                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                        Clearing All...
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 className="h-4 w-4 mr-2" />
+                        Clear All Cache
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={handleDebugCache}
+                    title="Show cache keys in console"
+                  >
+                    <Database className="h-4 w-4" />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Edit Job Modal */}
           <Dialog open={showJobModal} onOpenChange={setShowJobModal}>

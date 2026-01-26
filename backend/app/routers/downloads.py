@@ -167,10 +167,19 @@ async def search_releases(
         if prowlarr_server.url_base:
             base_url = f"{base_url}/{prowlarr_server.url_base.strip('/')}"
 
+        # Parse indexer IDs from JSON if configured
+        indexer_ids = None
+        if prowlarr_server.indexer_ids_json:
+            try:
+                indexer_ids = json.loads(prowlarr_server.indexer_ids_json)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
         # Initialize Prowlarr source with database config
         source = ProwlarrSource(
             base_url=base_url,
-            api_key=prowlarr_server.api_key
+            api_key=prowlarr_server.api_key,
+            indexer_ids=indexer_ids
         )
 
         # Search for releases
@@ -179,6 +188,21 @@ async def search_releases(
             author=book.author,
             isbn=book.isbn,
             format_type=format_type
+        )
+
+        # Filter releases to only include protocols with configured clients
+        available_protocols = db.query(DownloadClient.protocol).filter(
+            DownloadClient.enabled == True
+        ).distinct().all()
+        available_protocols = [p.protocol for p in available_protocols if p.protocol]
+
+        if available_protocols:
+            releases = [r for r in releases if r.protocol in available_protocols]
+
+        logger.debug(
+            "search_filtered_by_protocol",
+            available_protocols=available_protocols,
+            releases_after_filter=len(releases)
         )
 
         # Convert to response format and check if already downloaded

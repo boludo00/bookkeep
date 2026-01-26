@@ -1,12 +1,17 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Bookkeep</title>
     <meta name="description" content="Self-hosted book request tool for Readarr + Hardcover." />
     <meta name="author" content="Bookkeep" />
+    <meta name="theme-color" content="#0a0b0d" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+    <!-- Preconnect to Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 
     <meta property="og:title" content="Bookkeep" />
     <meta property="og:description" content="Self-hosted book request tool for Readarr + Hardcover." />
@@ -16,6 +21,14 @@
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:site" content="@Bookkeep" />
     <meta name="twitter:image" content="/bookkeeplogo.png" />
+
+    <style>
+      /* Prevent FOUC (Flash of Unstyled Content) */
+      html {
+        background-color: #0a0b0d;
+        color-scheme: dark;
+      }
+    </style>
   </head>
 
   <body>

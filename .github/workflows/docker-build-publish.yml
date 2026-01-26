@@ -114,9 +114,8 @@ jobs:
               "akiraslingshot/bookkeep:latest")
             app_version="${{ env.new_tag }}"
           elif [ "${{ github.ref }}" = "refs/heads/develop" ]; then
-            short_sha=$(git rev-parse --short HEAD)
-            image_tags="akiraslingshot/bookkeep:${{ env.latest_tag }}-develop-${short_sha}"
-            app_version="${{ env.latest_tag }}-develop-${short_sha}"
+            image_tags="akiraslingshot/bookkeep:develop"
+            app_version="develop"
           else
             short_sha=$(git rev-parse --short HEAD)
             image_tags="akiraslingshot/bookkeep:${short_sha}"
