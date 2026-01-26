@@ -81,7 +81,7 @@ class TorrentHandler(DownloadHandler):
                         except:
                             pass
 
-                    # Initialize client
+                    # Initialize client with format-specific categories
                     client = QBittorrentClient(
                         host=client_config.host,
                         port=client_config.port,
@@ -89,6 +89,8 @@ class TorrentHandler(DownloadHandler):
                         password=client_config.password,
                         use_ssl=client_config.use_ssl,
                         category=client_config.category,
+                        ebook_category=client_config.ebook_category,
+                        audiobook_category=client_config.audiobook_category,
                         path_mappings=path_mappings,
                     )
 
@@ -179,9 +181,9 @@ class TorrentHandler(DownloadHandler):
                         message="Adding torrent to client"
                     ))
 
-                # Use the client's configured category (from download client settings)
-                # This respects the user's qBittorrent category configuration
-                category = client.category
+                # Select category based on format (ebook/audiobook) with fallback to default
+                # This respects the user's format-specific qBittorrent category configuration
+                category = client.get_category_for_format(task.format)
 
                 # Add torrent with unique tag to identify it later
                 # Use task_id as unique identifier to avoid race conditions
