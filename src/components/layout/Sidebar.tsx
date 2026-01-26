@@ -2,6 +2,8 @@ import { NavLink, useLocation, Link } from 'react-router-dom';
 import { Compass, Clock, Settings, Users, Shield, BookOpen, Download, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUser } from '@/contexts/UserContext';
+import { useQuery } from '@tanstack/react-query';
+import { requestsApi } from '@/lib/api';
 
 const navItems = [
   { to: '/', icon: Compass, label: 'Discover' },
@@ -24,6 +26,14 @@ interface SidebarProps {
 export function Sidebar({ variant = 'desktop', className }: SidebarProps) {
   const location = useLocation();
   const { isAdmin } = useUser();
+
+  const { data: pendingRequests } = useQuery({
+    queryKey: ['requests', 'pending-count'],
+    queryFn: () => requestsApi.getAll(0, 100, 'pending'),
+    enabled: isAdmin,
+    refetchInterval: 60_000,
+  });
+  const pendingCount = pendingRequests?.length ?? 0;
 
   const appVersion = import.meta.env.VITE_APP_VERSION || 'dev';
   const isMobile = variant === 'mobile';
@@ -131,9 +141,13 @@ export function Sidebar({ variant = 'desktop', className }: SidebarProps) {
                       )} />
                     </div>
                     <span className="tracking-wide">{item.label}</span>
-                    {isActive && (
+                    {item.to === '/admin' && pendingCount > 0 ? (
+                      <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-warning px-1.5 text-[10px] font-bold text-warning-foreground">
+                        {pendingCount}
+                      </span>
+                    ) : isActive ? (
                       <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
-                    )}
+                    ) : null}
                   </NavLink>
                 );
               })}

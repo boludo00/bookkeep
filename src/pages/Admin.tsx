@@ -80,6 +80,15 @@ export default function Admin() {
   const pendingRequests = requests.filter((r) => r.status === 'pending');
   const processedRequests = requests.filter((r) => r.status !== 'pending');
 
+  const isToday = (dateStr: string | undefined) => {
+    if (!dateStr) return false;
+    const date = new Date(dateStr);
+    const now = new Date();
+    return date.getFullYear() === now.getFullYear()
+      && date.getMonth() === now.getMonth()
+      && date.getDate() === now.getDate();
+  };
+
   const handleApprove = (id: string) => {
     setApprovingId(id);
     updateRequestMutation.mutate(
@@ -161,7 +170,9 @@ export default function Admin() {
         <div className="p-4 rounded-lg bg-card border border-border">
           <p className="text-sm text-muted-foreground">Approved Today</p>
           <p className="text-3xl font-bold text-primary mt-1">
-            {requests.filter((r) => r.status === 'approved').length}
+            {requests.filter((r) =>
+              ['approved', 'processing', 'available'].includes(r.status) && isToday(r.updatedAt)
+            ).length}
           </p>
         </div>
         <div className="p-4 rounded-lg bg-card border border-border">
