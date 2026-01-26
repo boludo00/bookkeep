@@ -114,7 +114,8 @@ class TestSearch:
             mock_client.search("query", indexer_ids=[1, 2, 3])
 
         call_kwargs = mock_get.call_args.kwargs
-        assert call_kwargs["params"]["indexerIds"] == "1,2,3"
+        # indexerIds is passed as a list for requests to serialize as separate params
+        assert call_kwargs["params"]["indexerIds"] == [1, 2, 3]
 
     def test_search_with_limit_offset(self, mock_client):
         mock_response = Mock()
