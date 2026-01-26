@@ -745,6 +745,15 @@ export interface ProwlarrServer {
   url_base: string | null;
   enabled: boolean;
   is_default: boolean;
+  indexer_ids: number[] | null;
+}
+
+export interface ProwlarrIndexer {
+  id: number;
+  name: string;
+  protocol: string;
+  privacy: string;
+  enabled: boolean;
 }
 
 export interface DownloadClient {
@@ -784,13 +793,13 @@ export const downloadSettingsApi = {
   getProwlarrServers: () =>
     apiRequest<Array<ProwlarrServer>>('/api/download-settings/prowlarr'),
 
-  createProwlarrServer: (server: { name: string; host: string; port?: number; use_ssl?: boolean; api_key: string; url_base?: string; enabled?: boolean; is_default?: boolean }) =>
+  createProwlarrServer: (server: { name: string; host: string; port?: number; use_ssl?: boolean; api_key: string; url_base?: string; enabled?: boolean; is_default?: boolean; indexer_ids?: number[] }) =>
     apiRequest<ProwlarrServer>('/api/download-settings/prowlarr', {
       method: 'POST',
       body: JSON.stringify(server),
     }),
 
-  updateProwlarrServer: (id: number, server: { name?: string; host?: string; port?: number; use_ssl?: boolean; api_key?: string; url_base?: string; enabled?: boolean; is_default?: boolean }) =>
+  updateProwlarrServer: (id: number, server: { name?: string; host?: string; port?: number; use_ssl?: boolean; api_key?: string; url_base?: string; enabled?: boolean; is_default?: boolean; indexer_ids?: number[] }) =>
     apiRequest<ProwlarrServer>(`/api/download-settings/prowlarr/${id}`, {
       method: 'PUT',
       body: JSON.stringify(server),
@@ -806,6 +815,9 @@ export const downloadSettingsApi = {
       method: 'POST',
       body: JSON.stringify(config),
     }),
+
+  getProwlarrIndexers: (serverId: number) =>
+    apiRequest<{ indexers: ProwlarrIndexer[] }>(`/api/download-settings/prowlarr/${serverId}/indexers`),
 
   // Download Client endpoints
   getDownloadClients: () =>

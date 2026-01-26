@@ -275,6 +275,7 @@ def get_source(name: str, db_session=None) -> ReleaseSource:
     if name == "prowlarr":
         from ..database import SessionLocal
         from ..models import ProwlarrServer
+        import json
 
         db = db_session or SessionLocal()
         try:
@@ -289,9 +290,18 @@ def get_source(name: str, db_session=None) -> ReleaseSource:
                 if prowlarr_server.url_base:
                     base_url = f"{base_url}/{prowlarr_server.url_base.strip('/')}"
 
+                # Parse indexer IDs from JSON if configured
+                indexer_ids = None
+                if prowlarr_server.indexer_ids_json:
+                    try:
+                        indexer_ids = json.loads(prowlarr_server.indexer_ids_json)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
                 return _SOURCES[name](
                     base_url=base_url,
-                    api_key=prowlarr_server.api_key
+                    api_key=prowlarr_server.api_key,
+                    indexer_ids=indexer_ids
                 )
         finally:
             if not db_session:
