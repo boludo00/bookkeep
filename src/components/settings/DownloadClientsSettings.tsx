@@ -33,6 +33,7 @@ interface DownloadClientForm {
   use_ssl: boolean;
   username: string;
   password: string;
+  api_key: string;
   enabled: boolean;
   priority: number;
   category: string;
@@ -56,6 +57,7 @@ export default function DownloadClientsSettings() {
     use_ssl: false,
     username: '',
     password: '',
+    api_key: '',
     enabled: true,
     priority: 0,
     category: 'books',
@@ -117,6 +119,7 @@ export default function DownloadClientsSettings() {
       use_ssl: false,
       username: '',
       password: '',
+      api_key: '',
       enabled: true,
       priority: 0,
       category: 'books',
@@ -143,6 +146,7 @@ export default function DownloadClientsSettings() {
       use_ssl: client.use_ssl,
       username: client.username || '',
       password: '', // Don't populate password for security
+      api_key: '', // Don't populate API key for security
       enabled: client.enabled,
       priority: client.priority,
       category: client.category || 'books',
@@ -165,7 +169,7 @@ export default function DownloadClientsSettings() {
         use_ssl: form.use_ssl,
         username: form.username || undefined,
         password: form.password || undefined,
-        api_key: form.password || undefined, // For Sabnzbd, password field contains API key
+        api_key: form.api_key || undefined,
       });
 
       setTestResult(result);
@@ -193,10 +197,13 @@ export default function DownloadClientsSettings() {
       return;
     }
 
-    // Don't send empty password for updates
+    // Don't send empty password/api_key for updates
     const data = { ...form };
     if (editingClient && !data.password) {
       delete (data as any).password;
+    }
+    if (editingClient && !data.api_key) {
+      delete (data as any).api_key;
     }
 
     saveClientMutation.mutate(data);
@@ -371,63 +378,91 @@ export default function DownloadClientsSettings() {
               </div>
             </div>
 
-            {form.type === 'qbittorrent' && (
+            {/* Username field: qBittorrent and NZBGet */}
+            {(form.type === 'qbittorrent' || form.type === 'nzbget') && (
               <div className="space-y-2">
                 <Label htmlFor="client-username" className="text-foreground">Username</Label>
                 <Input
                   id="client-username"
                   value={form.username}
                   onChange={(e) => setForm({ ...form, username: e.target.value })}
-                  placeholder="admin"
+                  placeholder={form.type === 'nzbget' ? 'nzbget' : 'admin'}
                   className="bg-secondary border-border"
                 />
               </div>
             )}
 
-            <div className="space-y-2">
-              <Label htmlFor="client-password" className="text-foreground">
-                {form.type === 'sabnzbd' ? 'API Key' : form.type === 'nzbget' ? 'API Key' : 'Password'} {editingClient ? '(leave blank to keep current)' : ''}
-              </Label>
-              <div className="relative">
-                <Input
-                  id="client-password"
-                  type={showPassword ? "text" : "password"}
-                  value={form.password}
-                  onChange={(e) => setForm({ ...form, password: e.target.value })}
-                  placeholder={
-                    form.type === 'nzbget'
-                      ? 'ControlPassword from nzbget.conf'
-                      : form.type === 'sabnzbd'
-                        ? 'API Key from Sabnzbd settings'
-                        : ''
-                  }
-                  className="bg-secondary border-border pr-10"
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="absolute right-0 top-0 h-full px-3"
-                  onClick={() => setShowPassword(!showPassword)}
-                >
-                  {showPassword ? (
-                    <EyeOff className="h-4 w-4" />
-                  ) : (
-                    <Eye className="h-4 w-4" />
-                  )}
-                </Button>
+            {/* Password field: qBittorrent and NZBGet */}
+            {(form.type === 'qbittorrent' || form.type === 'nzbget') && (
+              <div className="space-y-2">
+                <Label htmlFor="client-password" className="text-foreground">
+                  Password {editingClient ? '(leave blank to keep current)' : ''}
+                </Label>
+                <div className="relative">
+                  <Input
+                    id="client-password"
+                    type={showPassword ? "text" : "password"}
+                    value={form.password}
+                    onChange={(e) => setForm({ ...form, password: e.target.value })}
+                    placeholder={form.type === 'nzbget' ? 'ControlPassword from nzbget.conf' : ''}
+                    className="bg-secondary border-border pr-10"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="absolute right-0 top-0 h-full px-3"
+                    onClick={() => setShowPassword(!showPassword)}
+                  >
+                    {showPassword ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+                {form.type === 'nzbget' && (
+                  <p className="text-xs text-muted-foreground">
+                    Use the ControlPassword from your nzbget.conf file
+                  </p>
+                )}
               </div>
-              {form.type === 'nzbget' && (
+            )}
+
+            {/* API Key field: SABnzbd */}
+            {form.type === 'sabnzbd' && (
+              <div className="space-y-2">
+                <Label htmlFor="client-api-key" className="text-foreground">
+                  API Key {editingClient ? '(leave blank to keep current)' : ''}
+                </Label>
+                <div className="relative">
+                  <Input
+                    id="client-api-key"
+                    type={showPassword ? "text" : "password"}
+                    value={form.api_key}
+                    onChange={(e) => setForm({ ...form, api_key: e.target.value })}
+                    placeholder="API Key from SABnzbd settings"
+                    className="bg-secondary border-border pr-10"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="absolute right-0 top-0 h-full px-3"
+                    onClick={() => setShowPassword(!showPassword)}
+                  >
+                    {showPassword ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
                 <p className="text-xs text-muted-foreground">
-                  Use the ControlPassword from your nzbget.conf file
+                  Find your API key in SABnzbd settings under General &rarr; Security
                 </p>
-              )}
-              {form.type === 'sabnzbd' && (
-                <p className="text-xs text-muted-foreground">
-                  Find your API key in Sabnzbd settings under General → Security
-                </p>
-              )}
-            </div>
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label htmlFor="client-category" className="text-foreground">Default Category (Legacy)</Label>

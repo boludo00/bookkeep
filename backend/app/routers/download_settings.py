@@ -70,13 +70,14 @@ class ProwlarrTestRequest(BaseModel):
 
 class DownloadClientCreate(BaseModel):
     name: str
-    type: str  # "qbittorrent", "nzbget"
+    type: str  # "qbittorrent", "nzbget", "sabnzbd"
     protocol: str  # "torrent", "usenet"
     host: str
     port: int
     use_ssl: bool = False
     username: Optional[str] = None
     password: Optional[str] = None
+    api_key: Optional[str] = None
     enabled: bool = True
     priority: int = 0
     category: Optional[str] = None
@@ -94,6 +95,7 @@ class DownloadClientUpdate(BaseModel):
     use_ssl: Optional[bool] = None
     username: Optional[str] = None
     password: Optional[str] = None
+    api_key: Optional[str] = None
     enabled: Optional[bool] = None
     priority: Optional[int] = None
     category: Optional[str] = None
@@ -112,6 +114,7 @@ class DownloadClientResponse(BaseModel):
     use_ssl: bool
     username: Optional[str]
     password: str  # Will be masked in response
+    api_key: Optional[str] = None  # Will be masked in response
     enabled: bool
     priority: int
     category: Optional[str]
@@ -366,10 +369,12 @@ def get_download_clients(db: Session = Depends(get_db)):
     """Get all download clients"""
     clients = db.query(DownloadClient).order_by(DownloadClient.priority.desc()).all()
 
-    # Mask passwords
+    # Mask passwords and API keys
     for client in clients:
         if client.password:
             client.password = "***MASKED***"
+        if client.api_key:
+            client.api_key = "***MASKED***"
 
     return clients
 
@@ -395,9 +400,11 @@ def create_download_client(
 
     logger.info("download_client_created", client_id=db_client.id, name=db_client.name)
 
-    # Mask password in response
+    # Mask password and API key in response
     if db_client.password:
         db_client.password = "***MASKED***"
+    if db_client.api_key:
+        db_client.api_key = "***MASKED***"
 
     return db_client
 
@@ -421,10 +428,12 @@ def update_download_client(
         if existing:
             raise HTTPException(status_code=400, detail="Client name already exists")
 
-    # Update fields (skip password if not provided or empty)
+    # Update fields (skip password/api_key if not provided or empty)
     update_data = client.model_dump(exclude_unset=True)
     if "password" in update_data and not update_data["password"]:
         del update_data["password"]
+    if "api_key" in update_data and not update_data["api_key"]:
+        del update_data["api_key"]
 
     for key, value in update_data.items():
         setattr(db_client, key, value)
@@ -434,9 +443,11 @@ def update_download_client(
 
     logger.info("download_client_updated", client_id=db_client.id)
 
-    # Mask password in response
+    # Mask password and API key in response
     if db_client.password:
         db_client.password = "***MASKED***"
+    if db_client.api_key:
+        db_client.api_key = "***MASKED***"
 
     return db_client
 

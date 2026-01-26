@@ -189,6 +189,7 @@ class DownloadClient(Base):
     use_ssl = Column(Boolean, default=False)
     username = Column(String, nullable=True)
     password = Column(String, nullable=True)  # TODO: Encrypt this
+    api_key = Column(String, nullable=True)  # API key for SABnzbd and similar clients
 
     # Configuration
     enabled = Column(Boolean, default=True)
