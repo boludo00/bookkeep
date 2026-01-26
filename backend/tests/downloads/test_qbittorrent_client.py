@@ -5,11 +5,17 @@ Tests the QBittorrentClient implementation which handles torrent downloads
 via the qBittorrent Web API.
 """
 import pytest
+import hashlib
 from unittest.mock import Mock, patch, MagicMock, PropertyMock
 from typing import Dict, Any
 
 from app.downloads import DownloadState
-from app.downloads.clients.qbittorrent import QBittorrentClient
+from app.downloads.clients.qbittorrent import (
+    QBittorrentClient,
+    extract_info_hash_from_torrent,
+    _bdecode,
+    _bencode,
+)
 
 
 @pytest.fixture
@@ -55,6 +61,128 @@ def mock_torrent():
     torrent.num_leechs = 5
     torrent.ratio = 1.5
     return torrent
+
+
+@pytest.fixture
+def sample_torrent_bytes():
+    """
+    Create a valid torrent file structure for testing.
+
+    A torrent file is a bencoded dictionary containing an 'info' dict.
+    The info_hash is SHA1 of the bencoded info dict.
+    """
+    info_dict = {
+        'name': 'Test Book.epub',
+        'piece length': 262144,
+        'pieces': b'\x00' * 20,  # Fake piece hash
+        'length': 1024000,
+    }
+    torrent_dict = {
+        'announce': 'http://tracker.example.com/announce',
+        'info': info_dict,
+    }
+    return _bencode(torrent_dict)
+
+
+class TestBencode:
+    """Test bencode encoding/decoding"""
+
+    def test_bdecode_integer(self):
+        data = b'i42e'
+        result, _ = _bdecode(data)
+        assert result == 42
+
+    def test_bdecode_negative_integer(self):
+        data = b'i-123e'
+        result, _ = _bdecode(data)
+        assert result == -123
+
+    def test_bdecode_string(self):
+        data = b'4:test'
+        result, _ = _bdecode(data)
+        assert result == b'test'
+
+    def test_bdecode_list(self):
+        data = b'l4:testi42ee'
+        result, _ = _bdecode(data)
+        assert result == [b'test', 42]
+
+    def test_bdecode_dict(self):
+        data = b'd3:keyi42ee'
+        result, _ = _bdecode(data)
+        assert result == {'key': 42}
+
+    def test_bdecode_nested(self):
+        # Nested dict: {'info': {'name': 'test.txt'}, 'size': 100}
+        data = b'd4:infod4:name8:test.txte4:sizei100ee'
+        result, _ = _bdecode(data)
+        assert result == {'info': {'name': b'test.txt'}, 'size': 100}
+
+    def test_bencode_integer(self):
+        assert _bencode(42) == b'i42e'
+
+    def test_bencode_string(self):
+        assert _bencode('test') == b'4:test'
+
+    def test_bencode_bytes(self):
+        assert _bencode(b'test') == b'4:test'
+
+    def test_bencode_list(self):
+        assert _bencode([1, 2]) == b'li1ei2ee'
+
+    def test_bencode_dict(self):
+        # Keys are sorted
+        result = _bencode({'b': 1, 'a': 2})
+        assert result == b'd1:ai2e1:bi1ee'
+
+    def test_roundtrip(self):
+        original = {'info': {'name': b'book.epub', 'length': 1024}}
+        encoded = _bencode(original)
+        decoded, _ = _bdecode(encoded)
+        assert decoded == original
+
+
+class TestExtractInfoHash:
+    """Test info_hash extraction from torrent files"""
+
+    def test_extract_hash_from_valid_torrent(self, sample_torrent_bytes):
+        info_hash = extract_info_hash_from_torrent(sample_torrent_bytes)
+
+        assert info_hash is not None
+        assert len(info_hash) == 40  # SHA1 hex is 40 chars
+        assert info_hash == info_hash.lower()  # Should be lowercase
+
+    def test_extract_hash_deterministic(self, sample_torrent_bytes):
+        # Same torrent should always produce same hash
+        hash1 = extract_info_hash_from_torrent(sample_torrent_bytes)
+        hash2 = extract_info_hash_from_torrent(sample_torrent_bytes)
+        assert hash1 == hash2
+
+    def test_extract_hash_missing_info(self):
+        # Torrent without 'info' dict
+        bad_torrent = _bencode({'announce': 'http://example.com'})
+        info_hash = extract_info_hash_from_torrent(bad_torrent)
+        assert info_hash is None
+
+    def test_extract_hash_invalid_data(self):
+        info_hash = extract_info_hash_from_torrent(b'not a torrent')
+        assert info_hash is None
+
+    def test_extract_hash_empty_data(self):
+        info_hash = extract_info_hash_from_torrent(b'')
+        assert info_hash is None
+
+    def test_extract_hash_matches_manual_calculation(self):
+        # Create a simple torrent and verify hash calculation
+        info_dict = {'name': b'test.txt', 'length': 100, 'piece length': 100, 'pieces': b'\x00' * 20}
+        torrent = _bencode({'info': info_dict})
+
+        # Calculate expected hash manually
+        info_bencoded = _bencode(info_dict)
+        expected_hash = hashlib.sha1(info_bencoded).hexdigest().lower()
+
+        actual_hash = extract_info_hash_from_torrent(torrent)
+        assert actual_hash == expected_hash
 
 
 class TestQBittorrentClientInit:
@@ -193,20 +321,46 @@ class TestTestConnection:
 class TestAddTorrent:
     """Test adding torrents"""
 
-    def test_add_torrent_by_url(self, mock_qb_client):
-        mock_qb_client.client.torrents_add.return_value = "Ok."
-        # Must return torrent when queried by tag
-        mock_qb_client.client.torrents_info.return_value = [Mock(hash="abc123")]
-        mock_qb_client.client.torrents_categories.return_value = {"books": {}}
+    def test_add_torrent_by_url_downloads_file_first(self, mock_qb_client, sample_torrent_bytes):
+        """Test that URL downloads fetch the torrent file first to extract hash"""
+        expected_hash = extract_info_hash_from_torrent(sample_torrent_bytes)
 
-        # Use tags for reliable hash lookup
-        info_hash = mock_qb_client.add_torrent(
-            url="http://example.com/book.torrent",
-            tags=["bookkeep-test"]
-        )
+        # Mock the torrent file download
+        with patch.object(mock_qb_client, '_download_torrent_file', return_value=sample_torrent_bytes):
+            mock_qb_client.client.torrents_add.return_value = "Ok."
+            mock_qb_client.client.torrents_info.return_value = [Mock(hash=expected_hash)]
+            mock_qb_client.client.torrents_categories.return_value = {"books": {}}
 
-        assert info_hash == "abc123"
-        mock_qb_client.client.torrents_add.assert_called_once()
+            info_hash = mock_qb_client.add_torrent(
+                url="http://example.com/book.torrent",
+                tags=["bookkeep-test"]
+            )
+
+            assert info_hash == expected_hash
+            # Should add torrent file bytes, not URL
+            mock_qb_client.client.torrents_add.assert_called_once()
+            call_kwargs = mock_qb_client.client.torrents_add.call_args.kwargs
+            assert 'torrent_files' in call_kwargs
+
+    def test_add_torrent_by_url_fallback_when_download_fails(self, mock_qb_client):
+        """Test fallback to URL-based add when torrent file download fails"""
+        # Mock failed download
+        with patch.object(mock_qb_client, '_download_torrent_file', return_value=None):
+            mock_qb_client.client.torrents_add.return_value = "Ok."
+            mock_qb_client.client.torrents_info.return_value = [Mock(hash="fallback123")]
+            mock_qb_client.client.torrents_categories.return_value = {"books": {}}
+
+            info_hash = mock_qb_client.add_torrent(
+                url="http://example.com/book.torrent",
+                tags=["bookkeep-test"]
+            )
+
+            # Should still work via fallback
+            assert info_hash == "fallback123"
+            # Should add URL directly as fallback
+            mock_qb_client.client.torrents_add.assert_called_once()
+            call_kwargs = mock_qb_client.client.torrents_add.call_args.kwargs
+            assert 'urls' in call_kwargs or mock_qb_client.client.torrents_add.call_args.args
 
     def test_add_torrent_by_magnet(self, mock_qb_client):
         magnet = "magnet:?xt=urn:btih:ABCDEF1234567890ABCDEF1234567890ABCDEF12&dn=Book"
@@ -755,3 +909,164 @@ class TestEdgeCases:
 
         # Should fallback to save_path
         assert path == "/downloads/books"
+
+
+class TestDownloadTorrentFile:
+    """Test torrent file downloading"""
+
+    def test_download_valid_torrent_file(self, mock_qb_client, sample_torrent_bytes):
+        """Test downloading a valid torrent file"""
+        with patch('app.downloads.clients.qbittorrent.requests.get') as mock_get:
+            mock_response = Mock()
+            mock_response.content = sample_torrent_bytes
+            mock_response.headers = {'Content-Type': 'application/x-bittorrent'}
+            mock_response.raise_for_status = Mock()
+            mock_get.return_value = mock_response
+
+            result = mock_qb_client._download_torrent_file("http://example.com/book.torrent")
+
+            assert result == sample_torrent_bytes
+            mock_get.assert_called_once()
+
+    def test_download_invalid_content(self, mock_qb_client):
+        """Test handling of non-torrent content"""
+        with patch('app.downloads.clients.qbittorrent.requests.get') as mock_get:
+            mock_response = Mock()
+            mock_response.content = b'<html>Not a torrent</html>'
+            mock_response.headers = {'Content-Type': 'text/html'}
+            mock_response.raise_for_status = Mock()
+            mock_get.return_value = mock_response
+
+            result = mock_qb_client._download_torrent_file("http://example.com/book.torrent")
+
+            # Should return None for invalid content
+            assert result is None
+
+    def test_download_empty_content(self, mock_qb_client):
+        """Test handling of empty response"""
+        with patch('app.downloads.clients.qbittorrent.requests.get') as mock_get:
+            mock_response = Mock()
+            mock_response.content = b''
+            mock_response.headers = {}
+            mock_response.raise_for_status = Mock()
+            mock_get.return_value = mock_response
+
+            result = mock_qb_client._download_torrent_file("http://example.com/book.torrent")
+
+            assert result is None
+
+    def test_download_request_error(self, mock_qb_client):
+        """Test handling of request errors"""
+        import requests
+        with patch('app.downloads.clients.qbittorrent.requests.get') as mock_get:
+            mock_get.side_effect = requests.RequestException("Connection failed")
+
+            result = mock_qb_client._download_torrent_file("http://example.com/book.torrent")
+
+            assert result is None
+
+    def test_download_http_error(self, mock_qb_client):
+        """Test handling of HTTP errors"""
+        import requests
+        with patch('app.downloads.clients.qbittorrent.requests.get') as mock_get:
+            mock_response = Mock()
+            mock_response.raise_for_status.side_effect = requests.HTTPError("404 Not Found")
+            mock_get.return_value = mock_response
+
+            result = mock_qb_client._download_torrent_file("http://example.com/book.torrent")
+
+            assert result is None
+
+
+class TestWaitForTorrent:
+    """Test torrent verification/waiting"""
+
+    def test_wait_for_torrent_immediate(self, mock_qb_client):
+        """Test torrent found immediately"""
+        mock_qb_client.client.torrents_info.return_value = [Mock(hash="abc123")]
+
+        result = mock_qb_client._wait_for_torrent("abc123")
+
+        assert result is True
+        # Should only call once since found immediately
+        assert mock_qb_client.client.torrents_info.call_count == 1
+
+    def test_wait_for_torrent_after_delay(self, mock_qb_client):
+        """Test torrent found after a few attempts"""
+        # First two calls return empty, third succeeds
+        mock_qb_client.client.torrents_info.side_effect = [
+            [],
+            [],
+            [Mock(hash="abc123")]
+        ]
+
+        result = mock_qb_client._wait_for_torrent("abc123", max_attempts=5, delay=0.01)
+
+        assert result is True
+        assert mock_qb_client.client.torrents_info.call_count == 3
+
+    def test_wait_for_torrent_timeout(self, mock_qb_client):
+        """Test timeout when torrent never appears"""
+        mock_qb_client.client.torrents_info.return_value = []
+
+        result = mock_qb_client._wait_for_torrent("abc123", max_attempts=3, delay=0.01)
+
+        assert result is False
+        assert mock_qb_client.client.torrents_info.call_count == 3
+
+    def test_wait_for_torrent_api_error_recovery(self, mock_qb_client):
+        """Test recovery from API errors during wait"""
+        # First call raises error, second succeeds
+        mock_qb_client.client.torrents_info.side_effect = [
+            Exception("API error"),
+            [Mock(hash="abc123")]
+        ]
+
+        result = mock_qb_client._wait_for_torrent("abc123", max_attempts=5, delay=0.01)
+
+        assert result is True
+
+
+class TestAddTorrentWithPrecomputedHash:
+    """Test the new hash-before-add behavior"""
+
+    def test_add_torrent_magnet_extracts_hash_first(self, mock_qb_client):
+        """Test that magnet link hash is extracted before adding"""
+        expected_hash = "abcdef1234567890abcdef1234567890abcdef12"
+        magnet = f"magnet:?xt=urn:btih:{expected_hash.upper()}&dn=Book"
+
+        mock_qb_client.client.torrents_add.return_value = "Ok."
+        mock_qb_client.client.torrents_info.return_value = [Mock(hash=expected_hash)]
+
+        info_hash = mock_qb_client.add_torrent(magnet=magnet)
+
+        assert info_hash == expected_hash
+        # Verify we query by hash (not tag) for verification
+        mock_qb_client.client.torrents_info.assert_called()
+
+    def test_add_torrent_file_extracts_hash_first(self, mock_qb_client, sample_torrent_bytes):
+        """Test that torrent file hash is extracted before adding"""
+        expected_hash = extract_info_hash_from_torrent(sample_torrent_bytes)
+
+        mock_qb_client.client.torrents_add.return_value = "Ok."
+        mock_qb_client.client.torrents_info.return_value = [Mock(hash=expected_hash)]
+        mock_qb_client.client.torrents_categories.return_value = {}
+
+        info_hash = mock_qb_client.add_torrent(torrent_file=sample_torrent_bytes)
+
+        assert info_hash == expected_hash
+
+    def test_add_torrent_returns_hash_even_if_verification_fails(self, mock_qb_client, sample_torrent_bytes):
+        """Test optimistic return of hash even when verification times out"""
+        expected_hash = extract_info_hash_from_torrent(sample_torrent_bytes)
+
+        mock_qb_client.client.torrents_add.return_value = "Ok."
+        # Verification always fails
+        mock_qb_client.client.torrents_info.return_value = []
+        mock_qb_client.client.torrents_categories.return_value = {}
+
+        with patch.object(mock_qb_client, '_wait_for_torrent', return_value=False):
+            info_hash = mock_qb_client.add_torrent(torrent_file=sample_torrent_bytes)
+
+        # Should still return hash (optimistic like Readarr)
+        assert info_hash == expected_hash
