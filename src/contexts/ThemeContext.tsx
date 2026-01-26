@@ -133,6 +133,29 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 const STORAGE_KEY = 'bookkeep-theme';
 
+function updateFavicon(primaryColor: string) {
+  // Create an SVG favicon with the theme's primary color
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+    <rect width="32" height="32" rx="6" fill="#0a0b0d"/>
+    <path d="M8 7C8 6.44772 8.44772 6 9 6H14C14.5523 6 15 6.44772 15 7V25C15 25.5523 14.5523 26 14 26H9C8.44772 26 8 25.5523 8 25V7Z" fill="hsl(${primaryColor})"/>
+    <path d="M17 7C17 6.44772 17.4477 6 18 6H23C23.5523 6 24 6.44772 24 7V25C24 25.5523 23.5523 26 23 26H18C17.4477 26 17 25.5523 17 25V7Z" fill="hsl(${primaryColor})" fill-opacity="0.6"/>
+    <path d="M15 8V24" stroke="#0a0b0d" stroke-width="1.5"/>
+  </svg>`;
+
+  // Convert to data URL and update favicon
+  const dataUrl = `data:image/svg+xml,${encodeURIComponent(svg)}`;
+  let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+  if (link) {
+    link.href = dataUrl;
+  } else {
+    link = document.createElement('link');
+    link.rel = 'icon';
+    link.type = 'image/svg+xml';
+    link.href = dataUrl;
+    document.head.appendChild(link);
+  }
+}
+
 function applyTheme(theme: Theme) {
   const root = document.documentElement;
   const { colors } = theme;
@@ -168,6 +191,9 @@ function applyTheme(theme: Theme) {
   // Update glow effect based on primary color
   const glowValue = `0 0 40px hsl(${colors.primary} / 0.3), 0 0 80px hsl(${colors.primary} / 0.15)`;
   root.style.setProperty('--glow-emerald', glowValue);
+
+  // Update favicon to match theme
+  updateFavicon(colors.primary);
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
