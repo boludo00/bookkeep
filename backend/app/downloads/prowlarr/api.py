@@ -127,8 +127,8 @@ class ProwlarrClient:
             params["categories"] = ",".join(str(c) for c in categories)
 
         if indexer_ids:
-            # Prowlarr expects comma-separated indexer IDs
-            params["indexerIds"] = ",".join(str(i) for i in indexer_ids)
+            # Prowlarr expects indexerIds as separate params (e.g., indexerIds=1&indexerIds=2)
+            params["indexerIds"] = indexer_ids
 
         try:
             start_time = time.time()

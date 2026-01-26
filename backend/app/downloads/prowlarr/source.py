@@ -31,7 +31,8 @@ class ProwlarrSource(ReleaseSource):
         self,
         base_url: Optional[str] = None,
         api_key: Optional[str] = None,
-        timeout: int = 30
+        timeout: int = 30,
+        indexer_ids: Optional[List[int]] = None
     ):
         """
         Initialize Prowlarr source.
@@ -40,6 +41,7 @@ class ProwlarrSource(ReleaseSource):
             base_url: Prowlarr base URL (if None, reads from env/config)
             api_key: Prowlarr API key (if None, reads from env/config)
             timeout: Request timeout in seconds
+            indexer_ids: List of indexer IDs to search (None = all indexers)
         """
         # TODO: Read from database settings if not provided
         if base_url is None:
@@ -50,6 +52,7 @@ class ProwlarrSource(ReleaseSource):
             api_key = os.getenv("PROWLARR_API_KEY", "")
 
         self.client = ProwlarrClient(base_url, api_key, timeout)
+        self.indexer_ids = indexer_ids
 
     @property
     def name(self) -> str:
@@ -103,13 +106,15 @@ class ProwlarrSource(ReleaseSource):
                 "prowlarr_search",
                 query=query,
                 format_type=format_type,
-                categories=categories
+                categories=categories,
+                indexer_ids=self.indexer_ids
             )
 
             # Search with auto-retry (will try without categories if no results)
             results = self.client.search_with_retry(
                 query=query,
                 categories=categories,
+                indexer_ids=self.indexer_ids,
                 limit=100
             )
 

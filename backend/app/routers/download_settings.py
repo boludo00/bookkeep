@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel
 import structlog
+import json
 
 from ..database import get_db
 from ..models import ProwlarrServer, DownloadClient
@@ -28,6 +29,7 @@ class ProwlarrServerCreate(BaseModel):
     url_base: Optional[str] = None
     enabled: bool = True
     is_default: bool = False
+    indexer_ids: Optional[List[int]] = None  # List of allowed indexer IDs
 
 
 class ProwlarrServerUpdate(BaseModel):
@@ -39,6 +41,7 @@ class ProwlarrServerUpdate(BaseModel):
     url_base: Optional[str] = None
     enabled: Optional[bool] = None
     is_default: Optional[bool] = None
+    indexer_ids: Optional[List[int]] = None  # List of allowed indexer IDs
 
 
 class ProwlarrServerResponse(BaseModel):
@@ -51,6 +54,7 @@ class ProwlarrServerResponse(BaseModel):
     url_base: Optional[str]
     enabled: bool
     is_default: bool
+    indexer_ids: Optional[List[int]] = None  # List of allowed indexer IDs
 
     class Config:
         from_attributes = True
@@ -135,7 +139,41 @@ class DownloadClientTestRequest(BaseModel):
 def get_prowlarr_servers(db: Session = Depends(get_db)):
     """Get all Prowlarr servers"""
     servers = db.query(ProwlarrServer).all()
-    return servers
+
+    # Convert to response with parsed indexer_ids
+    responses = []
+    for server in servers:
+        responses.append(ProwlarrServerResponse(
+            id=server.id,
+            name=server.name,
+            host=server.host,
+            port=server.port,
+            use_ssl=server.use_ssl,
+            api_key=server.api_key,
+            url_base=server.url_base,
+            enabled=server.enabled,
+            is_default=server.is_default,
+            indexer_ids=_parse_indexer_ids(server.indexer_ids_json)
+        ))
+    return responses
+
+
+def _parse_indexer_ids(indexer_ids_json: Optional[str]) -> Optional[List[int]]:
+    """Parse indexer IDs from JSON string"""
+    if not indexer_ids_json:
+        return None
+    try:
+        ids = json.loads(indexer_ids_json)
+        return ids if ids else None
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+def _serialize_indexer_ids(indexer_ids: Optional[List[int]]) -> Optional[str]:
+    """Serialize indexer IDs to JSON string"""
+    if not indexer_ids:
+        return None
+    return json.dumps(indexer_ids)
 
 
 @router.post("/prowlarr", response_model=ProwlarrServerResponse)
@@ -155,14 +193,32 @@ def create_prowlarr_server(
     if server.is_default:
         db.query(ProwlarrServer).update({"is_default": False})
 
+    # Convert indexer_ids list to JSON
+    server_data = server.model_dump(exclude={"indexer_ids"})
+    server_data["indexer_ids_json"] = _serialize_indexer_ids(server.indexer_ids)
+
     # Create server
-    db_server = ProwlarrServer(**server.model_dump())
+    db_server = ProwlarrServer(**server_data)
     db.add(db_server)
     db.commit()
     db.refresh(db_server)
 
     logger.info("prowlarr_server_created", server_id=db_server.id, name=db_server.name)
-    return db_server
+
+    # Convert response to include parsed indexer_ids
+    response = ProwlarrServerResponse(
+        id=db_server.id,
+        name=db_server.name,
+        host=db_server.host,
+        port=db_server.port,
+        use_ssl=db_server.use_ssl,
+        api_key=db_server.api_key,
+        url_base=db_server.url_base,
+        enabled=db_server.enabled,
+        is_default=db_server.is_default,
+        indexer_ids=_parse_indexer_ids(db_server.indexer_ids_json)
+    )
+    return response
 
 
 @router.put("/prowlarr/{server_id}", response_model=ProwlarrServerResponse)
@@ -188,15 +244,33 @@ def update_prowlarr_server(
     if server.is_default:
         db.query(ProwlarrServer).update({"is_default": False})
 
-    # Update fields
-    for key, value in server.model_dump(exclude_unset=True).items():
+    # Update fields, handling indexer_ids specially
+    update_data = server.model_dump(exclude_unset=True)
+    if "indexer_ids" in update_data:
+        db_server.indexer_ids_json = _serialize_indexer_ids(update_data.pop("indexer_ids"))
+
+    for key, value in update_data.items():
         setattr(db_server, key, value)
 
     db.commit()
     db.refresh(db_server)
 
     logger.info("prowlarr_server_updated", server_id=db_server.id)
-    return db_server
+
+    # Convert response to include parsed indexer_ids
+    response = ProwlarrServerResponse(
+        id=db_server.id,
+        name=db_server.name,
+        host=db_server.host,
+        port=db_server.port,
+        use_ssl=db_server.use_ssl,
+        api_key=db_server.api_key,
+        url_base=db_server.url_base,
+        enabled=db_server.enabled,
+        is_default=db_server.is_default,
+        indexer_ids=_parse_indexer_ids(db_server.indexer_ids_json)
+    )
+    return response
 
 
 @router.delete("/prowlarr/{server_id}")
@@ -247,6 +321,43 @@ def test_prowlarr_connection(request: ProwlarrTestRequest):
             "success": False,
             "error": str(e)
         }
+
+
+@router.get("/prowlarr/{server_id}/indexers")
+def get_prowlarr_indexers(server_id: int, db: Session = Depends(get_db)):
+    """Get available indexers from a Prowlarr server"""
+    db_server = db.query(ProwlarrServer).filter(ProwlarrServer.id == server_id).first()
+    if not db_server:
+        raise HTTPException(status_code=404, detail="Server not found")
+
+    try:
+        # Build URL
+        protocol = "https" if db_server.use_ssl else "http"
+        base_url = f"{protocol}://{db_server.host}:{db_server.port}"
+        if db_server.url_base:
+            base_url += f"/{db_server.url_base.strip('/')}"
+
+        # Create client and get indexers
+        client = ProwlarrClient(base_url, db_server.api_key)
+        indexers = client.get_indexers()
+
+        # Return simplified indexer info
+        return {
+            "indexers": [
+                {
+                    "id": idx.get("id"),
+                    "name": idx.get("name"),
+                    "protocol": idx.get("protocol"),
+                    "privacy": idx.get("privacy"),
+                    "enabled": idx.get("enable", True),
+                }
+                for idx in indexers
+            ]
+        }
+
+    except Exception as e:
+        logger.error("prowlarr_get_indexers_failed", server_id=server_id, error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to get indexers: {str(e)}")
 
 
 # Download Client endpoints

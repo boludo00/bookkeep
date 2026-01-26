@@ -167,10 +167,19 @@ async def search_releases(
         if prowlarr_server.url_base:
             base_url = f"{base_url}/{prowlarr_server.url_base.strip('/')}"
 
+        # Parse indexer IDs from JSON if configured
+        indexer_ids = None
+        if prowlarr_server.indexer_ids_json:
+            try:
+                indexer_ids = json.loads(prowlarr_server.indexer_ids_json)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
         # Initialize Prowlarr source with database config
         source = ProwlarrSource(
             base_url=base_url,
-            api_key=prowlarr_server.api_key
+            api_key=prowlarr_server.api_key,
+            indexer_ids=indexer_ids
         )
 
         # Search for releases

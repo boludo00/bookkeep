@@ -222,6 +222,9 @@ class ProwlarrServer(Base):
     enabled = Column(Boolean, default=True)
     is_default = Column(Boolean, default=False)
 
+    # Indexer filtering - JSON list of allowed indexer IDs (empty/null = all indexers)
+    indexer_ids_json = Column(Text, nullable=True)
+
     # Metadata
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
