@@ -365,7 +365,7 @@ export default function BookDetails() {
                     <Button
                       size="lg"
                       onClick={() => setRequestOpen(true)}
-                      className="h-12 px-6 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-medium shadow-lg shadow-primary/25 transition-all duration-300 hover:shadow-primary/40"
+                      className="h-12 px-6 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-medium shadow-lg shadow-primary/25 transition-[background-color,box-shadow] duration-300 hover:shadow-primary/40"
                     >
                       <Clock className="h-4 w-4 mr-2" />
                       {preferredFormat === 'ebook'
@@ -454,7 +454,7 @@ export default function BookDetails() {
                 return (
                   <div
                     key={promptKey}
-                    className="rounded-2xl border border-border/50 bg-card/30 backdrop-blur-sm p-6 animate-fade-in-up"
+                    className="rounded-2xl border border-border/50 bg-card/30 p-6 animate-fade-in-up"
                     style={{ animationDelay: `${index * 100}ms` }}
                   >
                     <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">

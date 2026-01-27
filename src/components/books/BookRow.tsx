@@ -76,7 +76,7 @@ export function BookRow({ title, books, viewAllLink, requestStatusMap }: BookRow
           <Button
             variant="secondary"
             size="icon"
-            className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-2 z-10 h-12 w-12 rounded-xl shadow-xl bg-card/90 backdrop-blur-sm border border-border/50 opacity-0 group-hover/row:opacity-100 transition-all duration-300 hover:bg-card hover:border-primary/30 hover:scale-105"
+            className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-2 z-10 h-12 w-12 rounded-xl shadow-xl bg-card border border-border/50 opacity-0 group-hover/row:opacity-100 transition-[opacity,transform,border-color,background-color] duration-300 hover:bg-card hover:border-primary/30 hover:scale-105"
             onClick={() => scroll('left')}
           >
             <ChevronLeft className="h-5 w-5" />
@@ -115,7 +115,7 @@ export function BookRow({ title, books, viewAllLink, requestStatusMap }: BookRow
           <Button
             variant="secondary"
             size="icon"
-            className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-2 z-10 h-12 w-12 rounded-xl shadow-xl bg-card/90 backdrop-blur-sm border border-border/50 opacity-0 group-hover/row:opacity-100 transition-all duration-300 hover:bg-card hover:border-primary/30 hover:scale-105"
+            className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-2 z-10 h-12 w-12 rounded-xl shadow-xl bg-card border border-border/50 opacity-0 group-hover/row:opacity-100 transition-[opacity,transform,border-color,background-color] duration-300 hover:bg-card hover:border-primary/30 hover:scale-105"
             onClick={() => scroll('right')}
           >
             <ChevronRight className="h-5 w-5" />

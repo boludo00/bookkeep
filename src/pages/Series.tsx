@@ -336,6 +336,7 @@ export default function Series() {
                     <img
                       src={cover}
                       alt=""
+                      loading="lazy"
                       className="h-full w-full object-cover opacity-30 blur-xl scale-110"
                     />
                     <div className="absolute inset-0 bg-card/80" />
@@ -350,6 +351,9 @@ export default function Series() {
                           <img
                             src={cover}
                             alt={seriesBooks[0]?.title || fallbackBook?.title || series.name}
+                            width={80}
+                            height={112}
+                            loading="lazy"
                             className="w-full h-full object-cover rounded shadow-lg"
                           />
                         )}

@@ -215,6 +215,9 @@ export default function Admin() {
                         <img
                           src={request.book.cover}
                           alt={request.book.title}
+                          width={32}
+                          height={48}
+                          loading="lazy"
                           className="h-12 w-8 rounded object-cover"
                         />
                         <div>

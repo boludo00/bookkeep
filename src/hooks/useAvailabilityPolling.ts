@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { readarrApi } from '@/lib/api';
+import { usePageVisibility } from '@/hooks/usePageVisibility';
 
 interface PendingRequest {
   hardcoverId: number;
@@ -32,9 +33,10 @@ export function useAvailabilityPolling({
   seriesId,
 }: AvailabilityPollingOptions) {
   const queryClient = useQueryClient();
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const startTimeRef = useRef<number>(Date.now());
   const previousAvailabilityRef = useRef<Map<number, { ebook: boolean; audiobook: boolean }>>(new Map());
+  const isVisible = usePageVisibility();
 
   useEffect(() => {
     // Reset start time when pending requests change
@@ -44,14 +46,15 @@ export function useAvailabilityPolling({
   }, [pendingRequests.length]);
 
   useEffect(() => {
-    if (!enabled || pendingRequests.length === 0) {
-      // Clear interval if no pending requests
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
+    if (!enabled || pendingRequests.length === 0 || !isVisible) {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
       }
       return;
     }
+
+    let cancelled = false;
 
     const checkAvailability = async () => {
       try {
@@ -126,16 +129,12 @@ export function useAvailabilityPolling({
     // Initial check
     checkAvailability();
 
-    // Set up polling with dynamic interval
+    // Use chained setTimeout instead of setInterval to avoid stacking
     const scheduleNextCheck = () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-
+      if (cancelled) return;
       const interval = getPollingInterval();
-      intervalRef.current = setInterval(() => {
-        checkAvailability();
-        // Reschedule to adjust interval based on elapsed time
+      timeoutRef.current = setTimeout(async () => {
+        await checkAvailability();
         scheduleNextCheck();
       }, interval);
     };
@@ -144,12 +143,13 @@ export function useAvailabilityPolling({
 
     // Cleanup
     return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
+      cancelled = true;
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
       }
     };
-  }, [enabled, pendingRequests, queryClient, seriesId]);
+  }, [enabled, pendingRequests, queryClient, seriesId, isVisible]);
 
   return null;
 }
