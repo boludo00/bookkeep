@@ -1,3 +1,4 @@
+import { Suspense, lazy } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -6,26 +7,46 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { UserProvider } from "@/contexts/UserContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { AuthWrapper } from "@/components/AuthWrapper";
-import Discover from "@/pages/Discover";
-import Browse from "@/pages/Browse";
-import BookDetails from "@/pages/BookDetails";
-import Requests from "@/pages/Requests";
-import Downloads from "@/pages/Downloads";
-import Admin from "@/pages/Admin";
-import Users from "@/pages/Users";
-import Settings from "@/pages/Settings";
-import Profile from "@/pages/Profile";
-import Series from "@/pages/Series";
-import SeriesDetail from "@/pages/SeriesDetail";
-import SearchResults from "@/pages/SearchResults";
-import Author from "@/pages/Author";
-import PromptDetail from "@/pages/PromptDetail";
-import Login from "@/pages/Login";
-import NotFound from "@/pages/NotFound";
-import AdminSetup from "@/pages/AdminSetup";
+import { Loader2 } from "lucide-react";
 import { AdminCheckWrapper } from "@/components/AdminCheckWrapper";
 
-const queryClient = new QueryClient();
+// Keep Login and NotFound as static imports (entry point + tiny fallback)
+import Login from "@/pages/Login";
+import NotFound from "@/pages/NotFound";
+
+// Lazy-load all other pages for code splitting
+const Discover = lazy(() => import("@/pages/Discover"));
+const Browse = lazy(() => import("@/pages/Browse"));
+const BookDetails = lazy(() => import("@/pages/BookDetails"));
+const Requests = lazy(() => import("@/pages/Requests"));
+const Downloads = lazy(() => import("@/pages/Downloads"));
+const Admin = lazy(() => import("@/pages/Admin"));
+const Users = lazy(() => import("@/pages/Users"));
+const Settings = lazy(() => import("@/pages/Settings"));
+const Profile = lazy(() => import("@/pages/Profile"));
+const Series = lazy(() => import("@/pages/Series"));
+const SeriesDetail = lazy(() => import("@/pages/SeriesDetail"));
+const SearchResults = lazy(() => import("@/pages/SearchResults"));
+const Author = lazy(() => import("@/pages/Author"));
+const PromptDetail = lazy(() => import("@/pages/PromptDetail"));
+const AdminSetup = lazy(() => import("@/pages/AdminSetup"));
+
+function PageLoader() {
+  return (
+    <div className="flex items-center justify-center min-h-[50vh]">
+      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+    </div>
+  );
+}
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -34,6 +55,7 @@ const App = () => (
         <TooltipProvider>
           <Toaster position="bottom-right" theme="dark" />
           <BrowserRouter>
+            <Suspense fallback={<PageLoader />}>
             <Routes>
               {/* Public routes */}
               <Route path="/login" element={<Login />} />
@@ -63,6 +85,7 @@ const App = () => (
 
               <Route path="*" element={<NotFound />} />
             </Routes>
+            </Suspense>
           </BrowserRouter>
         </TooltipProvider>
       </ThemeProvider>

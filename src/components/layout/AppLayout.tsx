@@ -9,8 +9,8 @@ export function AppLayout() {
 
   return (
     <div className="min-h-screen bg-background relative">
-      {/* Cinematic ambient background effects */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+      {/* Cinematic ambient background effects – hidden on mobile to save GPU */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden hidden md:block">
         {/* Top-left emerald glow */}
         <div className="absolute -top-40 -left-40 w-96 h-96 bg-primary/5 rounded-full blur-[120px]" />
         {/* Bottom-right amber glow */}
@@ -34,7 +34,7 @@ export function AppLayout() {
 
       {/* Main content */}
       <main className="relative pt-24 sm:pt-16 md:ml-64">
-        <div className="p-4 sm:p-6 lg:p-8 animate-fade-in-up">
+        <div className="p-4 sm:p-6 lg:p-8">
           <Outlet />
         </div>
       </main>

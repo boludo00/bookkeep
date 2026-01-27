@@ -40,6 +40,7 @@ import {
 import { toast } from 'sonner';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { settingsApi, readarrApi, jobsApi, bookloreApi, downloadSettingsApi, type BookloreServer, type ProwlarrServer, type DownloadClient } from '@/lib/api';
+import { usePageVisibility } from '@/hooks/usePageVisibility';
 
 interface ReadarrServer {
   id: number;
@@ -118,29 +119,29 @@ function formatTimeUntilStatic(nextExecution: string | null): string {
   }
 }
 
-// Live countdown component that updates every second
+// Live countdown component that updates periodically
 function Countdown({ nextExecution }: { nextExecution: string | null }) {
   const [timeLeft, setTimeLeft] = useState(formatTimeUntilStatic(nextExecution));
-  
+
   useEffect(() => {
     if (!nextExecution) return;
-    
-    // Update immediately
+
     setTimeLeft(formatTimeUntilStatic(nextExecution));
-    
-    // Update every second
+
+    // Update every 10 seconds (job timings are in minutes/hours; second precision is unnecessary)
     const interval = setInterval(() => {
       setTimeLeft(formatTimeUntilStatic(nextExecution));
-    }, 1000);
-    
+    }, 10000);
+
     return () => clearInterval(interval);
   }, [nextExecution]);
-  
+
   return <span>{timeLeft}</span>;
 }
 
 export default function Settings() {
   const { isAdmin } = useUser();
+  const isVisible = usePageVisibility();
   const [showHardcoverToken, setShowHardcoverToken] = useState(false);
   const [hardcoverToken, setHardcoverToken] = useState('');
   const [ebookDownloadPath, setEbookDownloadPath] = useState('');
@@ -232,7 +233,7 @@ export default function Settings() {
         throw err;
       }
     },
-    refetchInterval: 5000, // Refresh every 5 seconds for real-time countdown
+    refetchInterval: isVisible ? 60000 : false, // Refresh every 60s when visible, pause when hidden
     retry: false,
   });
 

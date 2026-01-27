@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import { useUser } from '@/contexts/UserContext';
 import { useQuery } from '@tanstack/react-query';
 import { requestsApi } from '@/lib/api';
+import { usePageVisibility } from '@/hooks/usePageVisibility';
 
 const navItems = [
   { to: '/', icon: Compass, label: 'Discover' },
@@ -26,12 +27,13 @@ interface SidebarProps {
 export function Sidebar({ variant = 'desktop', className }: SidebarProps) {
   const location = useLocation();
   const { isAdmin } = useUser();
+  const isVisible = usePageVisibility();
 
   const { data: pendingRequests } = useQuery({
     queryKey: ['requests', 'pending-count'],
     queryFn: () => requestsApi.getAll(0, 100, 'pending'),
     enabled: isAdmin,
-    refetchInterval: 60_000,
+    refetchInterval: isVisible ? 60_000 : false,
   });
   const pendingCount = pendingRequests?.length ?? 0;
 

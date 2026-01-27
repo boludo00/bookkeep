@@ -76,7 +76,7 @@ export function SeriesRow({
           <Link
             key={item.id}
             to={`/series/${item.id}`}
-            className="group/series relative flex-shrink-0 w-[220px] rounded-xl border border-border bg-card/70 p-4 transition-all hover:border-primary/40 hover:bg-card"
+            className="group/series relative flex-shrink-0 w-[220px] rounded-xl border border-border bg-card/70 p-4 transition-[border-color,background-color] hover:border-primary/40 hover:bg-card"
           >
             <div className="space-y-2">
               <h3 className="text-base font-semibold text-foreground line-clamp-2">

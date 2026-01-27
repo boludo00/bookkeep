@@ -64,42 +64,75 @@ async function enrichAvailability(books: Book[]): Promise<Book[]> {
 }
 
 export function useTrendingBooks(limit: number = 12) {
-  return useQuery({
+  const booksQuery = useQuery({
     queryKey: ['hardcover', 'trending', limit],
     queryFn: async () => {
       const data = await getTrendingBooks(limit);
-      const books = transformBooks(data.books || []);
-      return enrichAvailability(books);
+      return transformBooks(data.books || []);
     },
     staleTime: 24 * 60 * 60 * 1000,
     gcTime: 24 * 60 * 60 * 1000,
   });
+
+  const enrichedQuery = useQuery({
+    queryKey: ['hardcover', 'trending', limit, 'availability'],
+    queryFn: () => enrichAvailability(booksQuery.data!),
+    enabled: !!booksQuery.data && booksQuery.data.length > 0,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  return {
+    ...booksQuery,
+    data: enrichedQuery.data ?? booksQuery.data,
+  };
 }
 
 export function usePopularBooks(limit: number = 12) {
-  return useQuery({
+  const booksQuery = useQuery({
     queryKey: ['hardcover', 'popular', limit],
     queryFn: async () => {
       const data = await getPopularBooks(limit);
-      const books = transformBooks(data.books || []);
-      return enrichAvailability(books);
+      return transformBooks(data.books || []);
     },
     staleTime: 24 * 60 * 60 * 1000,
     gcTime: 24 * 60 * 60 * 1000,
   });
+
+  const enrichedQuery = useQuery({
+    queryKey: ['hardcover', 'popular', limit, 'availability'],
+    queryFn: () => enrichAvailability(booksQuery.data!),
+    enabled: !!booksQuery.data && booksQuery.data.length > 0,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  return {
+    ...booksQuery,
+    data: enrichedQuery.data ?? booksQuery.data,
+  };
 }
 
 export function useNewReleases(limit: number = 12) {
-  return useQuery({
+  const booksQuery = useQuery({
     queryKey: ['hardcover', 'new-releases', limit],
     queryFn: async () => {
       const data = await getNewReleases(limit);
-      const books = transformBooks(data.books || []);
-      return enrichAvailability(books);
+      return transformBooks(data.books || []);
     },
     staleTime: 24 * 60 * 60 * 1000,
     gcTime: 24 * 60 * 60 * 1000,
   });
+
+  const enrichedQuery = useQuery({
+    queryKey: ['hardcover', 'new-releases', limit, 'availability'],
+    queryFn: () => enrichAvailability(booksQuery.data!),
+    enabled: !!booksQuery.data && booksQuery.data.length > 0,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  return {
+    ...booksQuery,
+    data: enrichedQuery.data ?? booksQuery.data,
+  };
 }
 
 export function useBookSearch(query: string, limit: number = 20) {
