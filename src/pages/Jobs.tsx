@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { jobsApi } from '@/lib/api';
+import { usePageVisibility } from '@/hooks/usePageVisibility';
 
 interface Job {
   name: string;
@@ -56,6 +57,7 @@ function formatTimeUntil(nextExecution: string | null): string {
 
 export default function Jobs() {
   const queryClient = useQueryClient();
+  const isVisible = usePageVisibility();
   const [runningJobs, setRunningJobs] = useState<Set<string>>(new Set());
 
   const { data: jobs = [], isLoading, error, refetch } = useQuery<Job[], Error>({
@@ -70,7 +72,7 @@ export default function Jobs() {
         throw err;
       }
     },
-    refetchInterval: 30000, // Refresh every 30 seconds to update "next execution" times
+    refetchInterval: isVisible ? 30000 : false, // Refresh every 30s when visible, pause when hidden
     retry: false, // Don't retry on error to show the error immediately
   });
 

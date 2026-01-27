@@ -167,6 +167,7 @@ export default function SearchResults() {
                         <img
                           src={book.cover}
                           alt={book.title}
+                          loading="lazy"
                           className="w-20 h-28 object-cover rounded shadow-sm hover:shadow-md transition-shadow"
                         />
                       </Link>

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import { Link } from 'react-router-dom';
 import { Star, Clock, BookOpen, Headphones } from 'lucide-react';
 import { cn, formatRating } from '@/lib/utils';
@@ -17,7 +17,7 @@ interface BookCardProps {
   requestStatus?: { ebook?: string | null; audiobook?: string | null };
 }
 
-export function BookCard({
+export const BookCard = memo(function BookCard({
   book,
   status = 'none',
   showRating = true,
@@ -60,7 +60,7 @@ export function BookCard({
               <img
                 src={book.cover}
                 alt={book.title}
-                className="h-full w-full object-cover transition-all duration-500 group-hover:scale-105"
+                className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
                 loading="lazy"
               />
 
@@ -75,7 +75,7 @@ export function BookCard({
                 <div className="absolute top-2.5 right-2.5 flex gap-1.5">
                   {ebookAvailable && (
                     <div
-                      className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/90 text-white shadow-lg shadow-emerald-500/30 backdrop-blur-sm"
+                      className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/90 text-white shadow-lg shadow-emerald-500/30"
                       title="eBook Available"
                     >
                       <BookOpen className="h-3.5 w-3.5" />
@@ -83,7 +83,7 @@ export function BookCard({
                   )}
                   {audiobookAvailable && (
                     <div
-                      className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-500/90 text-white shadow-lg shadow-violet-500/30 backdrop-blur-sm"
+                      className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-500/90 text-white shadow-lg shadow-violet-500/30"
                       title="Audiobook Available"
                     >
                       <Headphones className="h-3.5 w-3.5" />
@@ -96,7 +96,7 @@ export function BookCard({
               {!isAnyFormatAvailable && effectiveStatus === 'pending' && (
                 <div className="absolute top-2.5 right-2.5">
                   <div
-                    className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-500/90 text-amber-foreground shadow-lg shadow-amber-500/30 backdrop-blur-sm"
+                    className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-500/90 text-amber-foreground shadow-lg shadow-amber-500/30"
                     title="Requested"
                   >
                     <Clock className="h-3.5 w-3.5" />
@@ -107,14 +107,14 @@ export function BookCard({
               {/* Genre badge */}
               {book.genres[0] && (
                 <div className="absolute top-2.5 left-2.5">
-                  <span className="inline-flex items-center rounded-md bg-primary/90 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-primary-foreground shadow-lg shadow-primary/20 backdrop-blur-sm">
+                  <span className="inline-flex items-center rounded-md bg-primary/90 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-primary-foreground shadow-lg shadow-primary/20">
                     {book.genres[0]}
                   </span>
                 </div>
               )}
 
               {/* Hover info panel */}
-              <div className="absolute bottom-0 left-0 right-0 p-4 translate-y-2 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-300">
+              <div className="absolute bottom-0 left-0 right-0 p-4 translate-y-2 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-[transform,opacity] duration-300">
                 <h3 className="font-semibold text-foreground line-clamp-2 text-sm leading-snug">
                   {book.title}
                 </h3>
@@ -136,10 +136,10 @@ export function BookCard({
 
         {/* Request button */}
         {!isAnyFormatAvailable && showRequestButton && (
-          <div className="absolute bottom-3 right-3 translate-y-2 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-300">
+          <div className="absolute bottom-3 right-3 translate-y-2 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-[transform,opacity] duration-300">
             <Button
               size="sm"
-              className="h-8 px-3 text-xs font-medium rounded-lg bg-primary/90 hover:bg-primary text-primary-foreground shadow-lg shadow-primary/30 backdrop-blur-sm"
+              className="h-8 px-3 text-xs font-medium rounded-lg bg-primary/90 hover:bg-primary text-primary-foreground shadow-lg shadow-primary/30"
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -157,4 +157,4 @@ export function BookCard({
       )}
     </>
   );
-}
+});

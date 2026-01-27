@@ -104,7 +104,7 @@ export function Header({ onMenuClick }: HeaderProps) {
         <button
           type="button"
           onClick={onMenuClick}
-          className="order-1 inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-card/50 text-foreground hover:bg-card hover:border-primary/30 transition-all duration-300 md:hidden"
+          className="order-1 inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-card/50 text-foreground hover:bg-card hover:border-primary/30 transition-colors duration-300 md:hidden"
           aria-label="Open navigation"
         >
           <Menu className="h-5 w-5" />
@@ -117,7 +117,7 @@ export function Header({ onMenuClick }: HeaderProps) {
         >
           <div className="relative flex-1 z-40">
             <div className={`
-              absolute inset-0 rounded-xl transition-all duration-300 pointer-events-none
+              absolute inset-0 rounded-xl transition-[background-color,box-shadow] duration-300 pointer-events-none
               ${isSearchFocused ? 'bg-primary/5 ring-1 ring-primary/30' : 'bg-transparent'}
             `} />
             <Search className={`
@@ -132,7 +132,7 @@ export function Header({ onMenuClick }: HeaderProps) {
               onKeyDown={handleKeyDown}
               onFocus={() => { setShowResults(true); setIsSearchFocused(true); }}
               onBlur={() => { setTimeout(() => setShowResults(false), 200); setIsSearchFocused(false); }}
-              className="pl-11 pr-4 h-11 bg-card/50 border-border/50 rounded-xl placeholder:text-muted-foreground/60 focus:bg-card focus:border-primary/30 transition-all duration-300"
+              className="pl-11 pr-4 h-11 bg-card/50 border-border/50 rounded-xl placeholder:text-muted-foreground/60 focus:bg-card focus:border-primary/30 transition-[background-color,border-color] duration-300"
             />
             {showResults && debouncedQuery.length > 1 && (
               <div className="absolute top-full left-0 right-0 mt-2">
@@ -147,7 +147,7 @@ export function Header({ onMenuClick }: HeaderProps) {
           </div>
           <Button
             type="submit"
-            className="h-11 px-5 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-medium shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all duration-300"
+            className="h-11 px-5 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-medium shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-[background-color,box-shadow] duration-300"
             disabled={!searchQuery.trim()}
           >
             Search
@@ -161,7 +161,7 @@ export function Header({ onMenuClick }: HeaderProps) {
           {/* User Dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button className="flex items-center gap-3 rounded-xl p-1.5 pr-3 hover:bg-card/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:ring-offset-2 focus:ring-offset-background transition-all duration-300">
+              <button className="flex items-center gap-3 rounded-xl p-1.5 pr-3 hover:bg-card/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:ring-offset-2 focus:ring-offset-background transition-colors duration-300">
               <Avatar className={`h-9 w-9 ring-2 ring-border bg-gradient-to-br ${avatarGradient}`}>
                 <AvatarFallback className="text-white font-semibold text-sm bg-transparent">
                   {user ? getInitials(user.full_name, user.username) : <User className="h-4 w-4" />}
@@ -175,7 +175,7 @@ export function Header({ onMenuClick }: HeaderProps) {
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="end"
-            className="w-64 p-2 bg-card/95 backdrop-blur-xl border-border/50 rounded-xl shadow-2xl"
+            className="w-64 p-2 bg-card border-border/50 rounded-xl shadow-2xl"
           >
             {/* User Info Header */}
             <div className="flex items-center gap-3 px-2 py-3 rounded-lg bg-muted/30">

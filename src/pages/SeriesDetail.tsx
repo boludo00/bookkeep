@@ -212,8 +212,8 @@ export default function SeriesDetail() {
 
       {/* Hero Section */}
       <div className="relative rounded-2xl overflow-hidden">
-        {/* Blurred Background */}
-        <div className="absolute inset-0">
+        {/* Blurred Background – hidden on mobile for performance */}
+        <div className="absolute inset-0 hidden md:block">
           <img
             src={heroCover}
             alt=""
@@ -229,6 +229,7 @@ export default function SeriesDetail() {
             <img
               src={heroCover}
               alt={series.name}
+              loading="lazy"
               className="w-48 md:w-56 rounded-xl shadow-2xl mx-auto md:mx-0"
             />
           </div>

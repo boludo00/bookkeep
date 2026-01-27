@@ -83,6 +83,7 @@ export function BookDetailSheet({ bookId, open, onOpenChange }: BookDetailSheetP
                   <img
                     src={book.cover}
                     alt={book.title}
+                    loading="lazy"
                     className="w-32 rounded-lg shadow-lg"
                   />
                 </div>

@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Link } from 'react-router-dom';
 import { User } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -18,7 +19,7 @@ const statusConfig: Record<string, { label: string; className: string }> = {
   pending: { label: 'Pending', className: 'status-requested' },
 };
 
-export function RequestCard({ request }: RequestCardProps) {
+export const RequestCard = memo(function RequestCard({ request }: RequestCardProps) {
   const status = statusConfig[request.status] || { label: request.status, className: 'status-requested' };
   const year = new Date(request.book.publishedDate).getFullYear();
   const bookIdentifier =
@@ -29,8 +30,8 @@ export function RequestCard({ request }: RequestCardProps) {
       to={`/book/${bookIdentifier}`}
       className="group relative flex overflow-hidden rounded-xl bg-card border border-border card-hover"
     >
-      {/* Background Blur */}
-      <div className="absolute inset-0 overflow-hidden">
+      {/* Background Blur – hidden on mobile for performance */}
+      <div className="absolute inset-0 overflow-hidden hidden md:block">
         <img
           src={request.book.cover}
           alt=""
@@ -46,6 +47,7 @@ export function RequestCard({ request }: RequestCardProps) {
           <img
             src={request.book.cover}
             alt={request.book.title}
+            loading="lazy"
             className="h-24 w-16 sm:h-28 sm:w-20 rounded-lg object-cover shadow-lg"
           />
         </div>
@@ -80,4 +82,4 @@ export function RequestCard({ request }: RequestCardProps) {
       </div>
     </Link>
   );
-}
+});

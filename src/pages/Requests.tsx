@@ -92,12 +92,12 @@ function RequestRow({ request, index }: { request: BookRequest; index: number })
 
   return (
     <div
-      className="group relative overflow-hidden rounded-2xl bg-card/50 backdrop-blur-sm border border-border/50 hover:border-primary/30 transition-all duration-300 animate-fade-in-up"
+      className="group relative overflow-hidden rounded-2xl bg-card border border-border/50 hover:border-primary/30 transition-[border-color] duration-300 animate-fade-in-up"
       style={{ animationDelay: `${index * 50}ms` }}
     >
-      {/* Subtle background image blur */}
+      {/* Subtle background image (hidden on mobile for performance) */}
       <div
-        className="absolute inset-0 opacity-[0.03] group-hover:opacity-[0.06] transition-opacity duration-500"
+        className="absolute inset-0 opacity-[0.03] group-hover:opacity-[0.06] transition-opacity duration-500 hidden md:block"
         style={{
           backgroundImage: `url(${request.book.cover})`,
           backgroundSize: 'cover',
@@ -116,6 +116,7 @@ function RequestRow({ request, index }: { request: BookRequest; index: number })
             <img
               src={request.book.cover}
               alt={request.book.title}
+              loading="lazy"
               className="w-full h-full object-cover transition-transform duration-300 group-hover/cover:scale-105"
             />
           </div>
@@ -309,7 +310,7 @@ export default function Requests() {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="h-12 p-1.5 bg-card/50 backdrop-blur-sm border border-border/50 rounded-xl">
+        <TabsList className="h-12 p-1.5 bg-card/50 border border-border/50 rounded-xl">
           <TabsTrigger value="all" className="h-9 px-4 rounded-lg data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
             All
           </TabsTrigger>
