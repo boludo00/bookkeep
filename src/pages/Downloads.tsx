@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { usePageVisibility } from '@/hooks/usePageVisibility';
 import { Download, RefreshCw, Clock, CheckCircle, XCircle, Pause, PlayCircle, FolderInput, Trash2, AlertCircle, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -200,6 +201,7 @@ const getInitialCompletedTasks = () => {
 
 export default function Downloads() {
   const queryClient = useQueryClient();
+  const isVisible = usePageVisibility();
   const [filterState, setFilterState] = useState<string | undefined>(undefined);
   const completedTasksRef = useRef<Set<number>>(getInitialCompletedTasks());
 
@@ -214,7 +216,7 @@ export default function Downloads() {
         throw err;
       }
     },
-    refetchInterval: 2000, // Refresh every 2 seconds for real-time progress
+    refetchInterval: isVisible ? 5000 : false,
     retry: false,
   });
 
@@ -300,21 +302,21 @@ export default function Downloads() {
     },
   });
 
-  const activeTasks = tasks.filter(t =>
+  const activeTasks = useMemo(() => tasks.filter(t =>
     ['queued', 'downloading', 'checking'].includes(t.state)
-  );
+  ), [tasks]);
 
-  const completedTasks = tasks.filter(t =>
+  const completedTasks = useMemo(() => tasks.filter(t =>
     ['complete', 'seeding'].includes(t.state)
-  );
+  ), [tasks]);
 
-  const failedTasks = tasks.filter(t =>
+  const failedTasks = useMemo(() => tasks.filter(t =>
     t.state === 'error'
-  );
+  ), [tasks]);
 
-  const importedTasks = tasks.filter(t =>
+  const importedTasks = useMemo(() => tasks.filter(t =>
     t.import_status === 'imported'
-  );
+  ), [tasks]);
 
   // Watch for newly completed downloads and invalidate book queries
   useEffect(() => {

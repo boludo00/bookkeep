@@ -117,7 +117,8 @@ export default function Author() {
             <img
               src={author.image_url}
               alt=""
-              className="h-full w-full object-cover opacity-30 blur-3xl scale-110"
+              loading="lazy"
+              className="h-full w-full object-cover opacity-30 blur-3xl scale-110 hidden md:block"
             />
           ) : (
             <div className="h-full w-full bg-gradient-to-r from-background via-background/90 to-background/60" />
@@ -132,6 +133,7 @@ export default function Author() {
                 <img
                   src={author.image_url}
                   alt={author.name}
+                  loading="lazy"
                   className="h-full w-full object-cover"
                 />
               ) : (

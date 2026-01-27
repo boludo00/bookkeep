@@ -99,6 +99,7 @@ export function SearchResults({ results, query, isLoading, isFetched }: SearchRe
               <img
                 src={book.cover}
                 alt={book.title}
+                loading="lazy"
                 className="h-16 w-11 rounded object-cover"
               />
               <div className="flex-1 min-w-0">

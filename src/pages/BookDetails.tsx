@@ -13,6 +13,7 @@ import { requestsApi, booksApi } from '@/lib/api';
 import { transformHardcoverBook } from '@/lib/hardcover';
 import { toast } from 'sonner';
 import { useUser } from '@/contexts/UserContext';
+import { usePageVisibility } from '@/hooks/usePageVisibility';
 
 export default function BookDetails() {
   const { id } = useParams();
@@ -22,6 +23,7 @@ export default function BookDetails() {
   const [searchFormat, setSearchFormat] = useState<'ebook' | 'audiobook'>('ebook');
   const queryClient = useQueryClient();
   const { user } = useUser();
+  const isVisible = usePageVisibility();
   const bypassCache =
     searchParams.get('bypass_cache') === 'true' || searchParams.get('bypass_cache') === '1';
 
@@ -37,8 +39,8 @@ export default function BookDetails() {
       return books.find((b: any) => b.hardcover_id === hardcoverId) || null;
     },
     enabled: hasHardcoverId,
-    staleTime: 5 * 1000,
-    refetchInterval: hasHardcoverId ? 5000 : false,
+    staleTime: 30_000,
+    refetchInterval: hasHardcoverId && isVisible ? 30_000 : false,
   });
 
   const { data: requestStatus } = useQuery({
@@ -47,7 +49,7 @@ export default function BookDetails() {
     enabled: hasHardcoverId,
     staleTime: 15 * 1000,
     refetchOnMount: true,
-    refetchInterval: hasHardcoverId ? 30000 : false,
+    refetchInterval: hasHardcoverId && isVisible ? 30_000 : false,
     gcTime: 5 * 60 * 1000,
   });
 
@@ -216,8 +218,8 @@ export default function BookDetails() {
 
         {/* Hero Section */}
         <div className="relative rounded-3xl overflow-hidden">
-          {/* Blurred cover background */}
-          <div className="absolute inset-0">
+          {/* Blurred cover background – hidden on mobile for performance */}
+          <div className="absolute inset-0 hidden md:block">
             <img
               src={book.cover}
               alt=""

@@ -116,6 +116,7 @@ function RequestRow({ request, index }: { request: BookRequest; index: number })
             <img
               src={request.book.cover}
               alt={request.book.title}
+              loading="lazy"
               className="w-full h-full object-cover transition-transform duration-300 group-hover/cover:scale-105"
             />
           </div>

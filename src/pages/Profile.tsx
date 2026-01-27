@@ -234,6 +234,7 @@ export default function Profile() {
                   <img
                     src={request.book?.cover_url || '/placeholder.svg'}
                     alt={request.book?.title || 'Book'}
+                    loading="lazy"
                     className="h-full w-full object-cover"
                   />
                 </div>
