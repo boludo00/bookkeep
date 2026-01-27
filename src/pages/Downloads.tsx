@@ -216,7 +216,15 @@ export default function Downloads() {
         throw err;
       }
     },
-    refetchInterval: isVisible ? 5000 : false,
+    refetchInterval: (query) => {
+      if (!isVisible) return false;
+      const data = query.state.data;
+      if (!data) return 5000; // poll until first fetch completes
+      const hasActive = data.some((t: DownloadTask) =>
+        ['queued', 'downloading', 'checking'].includes(t.state)
+      );
+      return hasActive ? 5000 : false;
+    },
     retry: false,
   });
 

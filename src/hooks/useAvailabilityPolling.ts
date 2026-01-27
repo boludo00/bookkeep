@@ -118,9 +118,9 @@ export function useAvailabilityPolling({
       const elapsedMinutes = (Date.now() - startTimeRef.current) / 1000 / 60;
 
       if (elapsedMinutes < 5) {
-        return 30 * 1000; // 30 seconds for first 5 minutes
+        return 60 * 1000; // 60 seconds for first 5 minutes
       } else if (elapsedMinutes < 15) {
-        return 2 * 60 * 1000; // 2 minutes for 5-15 minutes
+        return 3 * 60 * 1000; // 3 minutes for 5-15 minutes
       } else {
         return 5 * 60 * 1000; // 5 minutes after 15 minutes
       }

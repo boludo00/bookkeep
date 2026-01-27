@@ -138,8 +138,8 @@ export default function Discover() {
       <div className="relative mb-10 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 py-8 overflow-hidden">
         {/* Background gradient */}
         <div className="absolute inset-0 bg-gradient-to-b from-primary/5 via-transparent to-transparent" />
-        <div className="absolute top-0 left-1/4 w-96 h-96 bg-primary/10 rounded-full blur-[100px]" />
-        <div className="absolute top-0 right-1/4 w-64 h-64 bg-amber-500/5 rounded-full blur-[80px]" />
+        <div className="absolute top-0 left-1/4 w-96 h-96 bg-primary/10 rounded-full blur-[100px] hidden md:block" />
+        <div className="absolute top-0 right-1/4 w-64 h-64 bg-amber-500/5 rounded-full blur-[80px] hidden md:block" />
 
         <div className="relative">
           <div className="flex items-center gap-3 mb-3">

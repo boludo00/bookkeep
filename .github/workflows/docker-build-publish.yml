@@ -103,9 +103,8 @@ jobs:
       - name: Set image tags
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            short_sha=$(echo "${GITHUB_SHA}" | cut -c1-7)
-            image_tags="akiraslingshot/bookkeep:pr-${{ github.event.pull_request.number }}-${short_sha}"
-            app_version="pr-${{ github.event.pull_request.number }}-${short_sha}"
+            image_tags="akiraslingshot/bookkeep:pr-${{ github.event.pull_request.number }}"
+            app_version="pr-${{ github.event.pull_request.number }}"
           elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
             image_tags=$(printf "%s\n%s\n%s" \
               "akiraslingshot/bookkeep:${{ env.new_tag }}" \

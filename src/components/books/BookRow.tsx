@@ -95,8 +95,7 @@ export function BookRow({ title, books, viewAllLink, requestStatusMap }: BookRow
           {books.map((book, index) => (
             <div
               key={book.id}
-              className="flex-shrink-0 w-[140px] sm:w-[160px] animate-fade-in-up"
-              style={{ animationDelay: `${index * 50}ms` }}
+              className="flex-shrink-0 w-[140px] sm:w-[160px]"
             >
               <BookCard
                 book={book}
