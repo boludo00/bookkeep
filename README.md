@@ -182,3 +182,13 @@ Develop branch publishes:
 Redis is used to cache Hardcover API responses. If Redis is unavailable, the app falls back to in-memory caching.
 
 See `backend/README.md` for backend API details.
+
+## A Note on AI Assistance
+
+**In the interest of transparency**: the frontend components in this project were all built with help from AI tools. This includes the React components, UI/UX bits, and styling, especially the theme picker!
+
+It's totally understandable if you are anti-AI or if that's just not your cup of tea, no hard feelings, there are plenty of great alternatives out there.
+
+As a backend-focused Python developer with **many** failed attempts at front end development, I can't express it enough just how helpful it is to offload the cumbersome and mundane parts of this project. 
+
+The backend, API design, database work, and overall system design will remain human.
