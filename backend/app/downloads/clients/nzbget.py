@@ -186,7 +186,8 @@ class NZBGetClient:
                     "",     # DupeKey
                     0,      # DupeScore
                     "SCORE", # DupeMode
-                    {}      # PPParameters
+                    True,    # AutoCategory
+                    [""]      # PPParameters
                 ])
 
             else:
@@ -206,7 +207,8 @@ class NZBGetClient:
                     "",     # DupeKey
                     0,      # DupeScore
                     "SCORE", # DupeMode
-                    {}      # PPParameters
+                    True,    # AutoCategory
+                    [""]      # PPParameters
                 ])
 
             if result and result > 0:
