@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Save, TestTube, CheckCircle, XCircle, Eye, EyeOff, Lock, Plus, Edit, Trash2, RefreshCw, Play, Clock, Database } from 'lucide-react';
 import ProwlarrSettings from '@/components/settings/ProwlarrSettings';
 import DownloadClientsSettings from '@/components/settings/DownloadClientsSettings';
+import DirectDownloadSettings from '@/components/settings/DirectDownloadSettings';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -1141,6 +1142,9 @@ export default function Settings() {
 
           {/* Download Clients Settings */}
           <DownloadClientsSettings />
+
+          {/* Direct Download Settings */}
+          <DirectDownloadSettings />
         </TabsContent>
 
         <TabsContent value="jobs" className="space-y-6 mt-6">

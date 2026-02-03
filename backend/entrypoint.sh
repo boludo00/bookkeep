@@ -1,5 +1,14 @@
 #!/bin/bash
 
+# Start Xvfb (virtual display) for Cloudflare bypass if available
+if command -v Xvfb &> /dev/null; then
+    echo "Starting Xvfb virtual display..."
+    Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp &
+    export DISPLAY=:99
+    sleep 1
+    echo "✓ Xvfb started on display :99"
+fi
+
 # Set DATABASE_URL explicitly to ensure it points to the correct location
 export DATABASE_URL="${DATABASE_URL:-sqlite:////app/data/bookkeep.db}"
 

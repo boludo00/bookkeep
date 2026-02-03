@@ -893,14 +893,39 @@ export interface DownloadTask {
   created_at: string | null;
   started_at: string | null;
   completed_at: string | null;
+  message?: string;
+}
+
+export interface DownloadAttempt {
+  source_name: string;
+  source_type: string;
+  url: string;
+  started_at: string;
+  ended_at: string | null;
+  success: boolean;
+  error: string | null;
+  bytes_downloaded: number;
+}
+
+export interface DownloadLog {
+  task_id: number;
+  started_at: string | null;
+  completed_at: string | null;
+  final_result: string | null;
+  attempts: DownloadAttempt[];
+  message?: string;
 }
 
 export const downloadsApi = {
-  // Search for releases via Prowlarr
-  searchReleases: (bookId: number, formatType: 'ebook' | 'audiobook') =>
-    apiRequest<SearchResponse>(`/api/downloads/search/${bookId}?format_type=${formatType}`, {
-      method: 'POST',
-    }),
+  // Search for releases
+  // source: 'prowlarr' | 'direct' | undefined (undefined = all sources)
+  searchReleases: (bookId: number, formatType: 'ebook' | 'audiobook', source?: 'prowlarr' | 'direct') => {
+    let url = `/api/downloads/search/${bookId}?format_type=${formatType}`;
+    if (source) {
+      url += `&source_filter=${source}`;
+    }
+    return apiRequest<SearchResponse>(url, { method: 'POST' });
+  },
 
   // Manually download a specific release
   downloadRelease: (request: {
@@ -933,6 +958,10 @@ export const downloadsApi = {
     return apiRequest<DownloadTask[]>(`/api/downloads/tasks${query ? `?${query}` : ''}`);
   },
 
+  // Get download log for a specific task (direct downloads only)
+  getTaskLog: (taskId: number) =>
+    apiRequest<DownloadLog>(`/api/downloads/tasks/${taskId}/log`),
+
   // Manually import a download to the configured destination
   importDownload: (taskId: number) =>
     apiRequest<{ success: boolean; message: string; destination_path: string }>(
@@ -953,4 +982,55 @@ export const downloadsApi = {
       '/api/downloads/tasks/clear',
       { method: 'DELETE' }
     ),
+};
+
+// Direct Download Settings types
+export interface DirectDownloadSettings {
+  id: number;
+  enabled: boolean;
+  annas_archive_enabled: boolean;
+  annas_archive_mirror: string | null;
+  zlibrary_enabled: boolean;
+  zlibrary_email: string | null;
+  zlibrary_password_set: boolean;
+  zlibrary_domain: string | null;
+  requests_per_minute: number;
+}
+
+export interface DirectDownloadTestResponse {
+  success: boolean;
+  providers_count: number;
+  providers_status: Record<string, boolean>;
+  message?: string;
+}
+
+// Direct Download API
+export const directDownloadApi = {
+  getSettings: () =>
+    apiRequest<DirectDownloadSettings>('/api/direct-downloads/settings'),
+
+  updateSettings: (data: {
+    enabled: boolean;
+    annas_archive_enabled: boolean;
+    annas_archive_mirror?: string;
+    zlibrary_enabled: boolean;
+    zlibrary_email?: string;
+    zlibrary_password?: string;
+    zlibrary_domain?: string;
+    requests_per_minute: number;
+  }) =>
+    apiRequest<DirectDownloadSettings>('/api/direct-downloads/settings', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  testConnection: () =>
+    apiRequest<DirectDownloadTestResponse>('/api/direct-downloads/test', {
+      method: 'POST',
+    }),
+
+  resetSettings: () =>
+    apiRequest<{ success: boolean; message: string }>('/api/direct-downloads/settings', {
+      method: 'DELETE',
+    }),
 };

@@ -12,9 +12,9 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Download, Search, HardDrive, Wifi, BookOpen, Headphones, CheckCircle, RefreshCw, XCircle, ExternalLink } from 'lucide-react';
+import { Download, Search, HardDrive, Wifi, BookOpen, Headphones, CheckCircle, RefreshCw, XCircle, ExternalLink, Globe } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
-import { downloadsApi, ReleaseInfo, booksApi } from '@/lib/api';
+import { downloadsApi, ReleaseInfo, booksApi, directDownloadApi } from '@/lib/api';
 import { toast } from 'sonner';
 
 interface SearchReleaseDialogProps {
@@ -36,6 +36,7 @@ interface SearchReleaseDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   formatType?: 'ebook' | 'audiobook'; // Optional - defaults to 'ebook' tab
+  sourceFilter?: 'prowlarr' | 'direct'; // Optional - filter by source
 }
 
 export function SearchReleaseDialog({
@@ -43,6 +44,7 @@ export function SearchReleaseDialog({
   open,
   onOpenChange,
   formatType = 'ebook',
+  sourceFilter,
 }: SearchReleaseDialogProps) {
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<'ebook' | 'audiobook'>(formatType);
@@ -81,6 +83,14 @@ export function SearchReleaseDialog({
     // Both unavailable, use current activeTab
     return activeTab;
   };
+
+  // Check if direct downloads are enabled
+  const { data: directDownloadSettings } = useQuery({
+    queryKey: ['direct-downloads', 'settings'],
+    queryFn: () => directDownloadApi.getSettings(),
+    staleTime: 5 * 60 * 1000,
+  });
+  const directDownloadsEnabled = directDownloadSettings?.enabled ?? false;
 
   // Ensure book exists in database
   const {
@@ -134,8 +144,8 @@ export function SearchReleaseDialog({
     isLoading: isSearchingEbooks,
     error: ebookSearchError,
   } = useQuery({
-    queryKey: ['downloads', 'search', bookId, 'ebook'],
-    queryFn: () => downloadsApi.searchReleases(bookId!, 'ebook'),
+    queryKey: ['downloads', 'search', bookId, 'ebook', sourceFilter],
+    queryFn: () => downloadsApi.searchReleases(bookId!, 'ebook', sourceFilter),
     enabled: open && !!bookId,
     staleTime: 5 * 60 * 1000, // Cache for 5 minutes
     retry: false, // Don't retry on timeout
@@ -148,8 +158,8 @@ export function SearchReleaseDialog({
     isLoading: isSearchingAudiobooks,
     error: audiobookSearchError,
   } = useQuery({
-    queryKey: ['downloads', 'search', bookId, 'audiobook'],
-    queryFn: () => downloadsApi.searchReleases(bookId!, 'audiobook'),
+    queryKey: ['downloads', 'search', bookId, 'audiobook', sourceFilter],
+    queryFn: () => downloadsApi.searchReleases(bookId!, 'audiobook', sourceFilter),
     enabled: open && !!bookId,
     staleTime: 5 * 60 * 1000, // Cache for 5 minutes
     retry: false, // Don't retry on timeout
@@ -292,11 +302,29 @@ export function SearchReleaseDialog({
   };
 
   const getProtocolIcon = (protocol: string) => {
-    return protocol === 'torrent' ? <Wifi className="h-4 w-4" /> : <HardDrive className="h-4 w-4" />;
+    switch (protocol) {
+      case 'torrent':
+        return <Wifi className="h-4 w-4" />;
+      case 'usenet':
+        return <HardDrive className="h-4 w-4" />;
+      case 'direct':
+        return <Globe className="h-4 w-4" />;
+      default:
+        return <Download className="h-4 w-4" />;
+    }
   };
 
   const getProtocolColor = (protocol: string) => {
-    return protocol === 'torrent' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' : 'bg-purple-500/20 text-purple-400 border-purple-500/30';
+    switch (protocol) {
+      case 'torrent':
+        return 'bg-blue-500/20 text-blue-400 border-blue-500/30';
+      case 'usenet':
+        return 'bg-purple-500/20 text-purple-400 border-purple-500/30';
+      case 'direct':
+        return 'bg-green-500/20 text-green-400 border-green-500/30';
+      default:
+        return 'bg-gray-500/20 text-gray-400 border-gray-500/30';
+    }
   };
 
   const getFormatIcon = (format: 'ebook' | 'audiobook') => {
@@ -347,7 +375,10 @@ export function SearchReleaseDialog({
           <Search className="h-12 w-12 text-muted-foreground mb-4" />
           <h3 className="text-lg font-semibold mb-2">No Releases Found</h3>
           <p className="text-sm text-muted-foreground max-w-md">
-            We couldn't find any {formatType} releases for this book. Try again later or check your Prowlarr configuration.
+            We couldn't find any {formatType} releases for this book.
+            {directDownloadsEnabled
+              ? ' The search includes direct download sources.'
+              : ' Enable direct downloads in Settings for more sources.'}
           </p>
         </div>
       );
@@ -532,10 +563,30 @@ export function SearchReleaseDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Download className="h-5 w-5" />
-            Search Results for {book.title}
+            {sourceFilter === 'direct' ? 'Direct Download' : sourceFilter === 'prowlarr' ? 'Download via Prowlarr' : 'Download'} - {book.title}
           </DialogTitle>
-          <DialogDescription>
-            Browse available ebook and audiobook releases
+          <DialogDescription className="flex items-center gap-2 flex-wrap">
+            {sourceFilter === 'direct' ? (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-green-500/20 text-green-400 text-xs font-medium border border-green-500/30">
+                <Globe className="h-3 w-3" />
+                Searching direct download sources
+              </span>
+            ) : sourceFilter === 'prowlarr' ? (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-500/20 text-blue-400 text-xs font-medium border border-blue-500/30">
+                <HardDrive className="h-3 w-3" />
+                Searching Prowlarr indexers
+              </span>
+            ) : (
+              <>
+                <span>Browse available releases</span>
+                {directDownloadsEnabled && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-green-500/20 text-green-400 text-xs font-medium border border-green-500/30">
+                    <Globe className="h-3 w-3" />
+                    Direct downloads enabled
+                  </span>
+                )}
+              </>
+            )}
           </DialogDescription>
         </DialogHeader>
 

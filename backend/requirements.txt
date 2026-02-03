@@ -16,4 +16,8 @@ redis==5.0.1
 apscheduler==3.10.4
 qbittorrent-api>=2024.1.59
 requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
+curl_cffi>=0.7.0
+seleniumbase>=4.32.0
 
