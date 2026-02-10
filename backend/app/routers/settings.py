@@ -130,6 +130,65 @@ async def update_download_paths(
     return {"message": "Download paths updated successfully"}
 
 
+# Browse Directories (Admin only)
+
+class DirectoryEntry(BaseModel):
+    name: str
+    path: str
+
+class BrowseDirectoriesResponse(BaseModel):
+    current_path: str
+    parent_path: Optional[str] = None
+    directories: List[DirectoryEntry] = []
+    error: Optional[str] = None
+
+@router.get("/browse-directories", response_model=BrowseDirectoriesResponse)
+async def browse_directories(
+    path: str = "/",
+    current_user: models.User = Depends(require_admin)
+):
+    """Browse directories on the filesystem (admin only)"""
+    resolved = os.path.abspath(path)
+
+    if not os.path.isdir(resolved):
+        return BrowseDirectoriesResponse(
+            current_path=resolved,
+            parent_path=os.path.dirname(resolved),
+            error=f"Directory not found: {resolved}"
+        )
+
+    parent = os.path.dirname(resolved) if resolved != "/" else None
+
+    directories: List[DirectoryEntry] = []
+    try:
+        with os.scandir(resolved) as entries:
+            for entry in entries:
+                if entry.name.startswith("."):
+                    continue
+                try:
+                    if entry.is_dir(follow_symlinks=False):
+                        directories.append(DirectoryEntry(
+                            name=entry.name,
+                            path=os.path.join(resolved, entry.name)
+                        ))
+                except PermissionError:
+                    continue
+    except PermissionError:
+        return BrowseDirectoriesResponse(
+            current_path=resolved,
+            parent_path=parent,
+            error=f"Permission denied: {resolved}"
+        )
+
+    directories.sort(key=lambda d: d.name.lower())
+
+    return BrowseDirectoriesResponse(
+        current_path=resolved,
+        parent_path=parent,
+        directories=directories
+    )
+
+
 # Cache Management (Admin only)
 
 class CacheResourceInfo(BaseModel):
