@@ -78,6 +78,7 @@ class DownloadClientCreate(BaseModel):
     username: Optional[str] = None
     password: Optional[str] = None
     api_key: Optional[str] = None
+    url_base: Optional[str] = None
     enabled: bool = True
     priority: int = 0
     category: Optional[str] = None
@@ -96,6 +97,7 @@ class DownloadClientUpdate(BaseModel):
     username: Optional[str] = None
     password: Optional[str] = None
     api_key: Optional[str] = None
+    url_base: Optional[str] = None
     enabled: Optional[bool] = None
     priority: Optional[int] = None
     category: Optional[str] = None
@@ -115,6 +117,7 @@ class DownloadClientResponse(BaseModel):
     username: Optional[str]
     password: str  # Will be masked in response
     api_key: Optional[str] = None  # Will be masked in response
+    url_base: Optional[str] = None
     enabled: bool
     priority: int
     category: Optional[str]
@@ -135,6 +138,7 @@ class DownloadClientTestRequest(BaseModel):
     username: Optional[str] = None
     password: Optional[str] = None
     api_key: Optional[str] = None
+    url_base: Optional[str] = None
 
 
 # Prowlarr endpoints
@@ -477,7 +481,8 @@ def test_download_client(request: DownloadClientTestRequest):
                     port=request.port,
                     username=request.username,
                     password=request.password,
-                    use_ssl=request.use_ssl
+                    use_ssl=request.use_ssl,
+                    url_base=request.url_base,
                 )
 
                 if not client.test_connection():
@@ -507,7 +512,8 @@ def test_download_client(request: DownloadClientTestRequest):
                     port=request.port,
                     username=request.username,
                     password=request.password,
-                    use_ssl=request.use_ssl
+                    use_ssl=request.use_ssl,
+                    url_base=request.url_base,
                 )
 
                 if not client.test_connection():
@@ -528,7 +534,8 @@ def test_download_client(request: DownloadClientTestRequest):
                     host=request.host,
                     port=request.port,
                     api_key=request.api_key,
-                    use_ssl=request.use_ssl
+                    use_ssl=request.use_ssl,
+                    url_base=request.url_base,
                 )
 
                 if not client.test_connection():

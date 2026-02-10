@@ -1148,7 +1148,8 @@ async def _sync_torrent_downloads(db: Session, tasks: list) -> int:
             port=client_config.port,
             username=client_config.username,
             password=client_config.password,
-            use_ssl=client_config.use_ssl
+            use_ssl=client_config.use_ssl,
+            url_base=client_config.url_base,
         )
 
         if not client.test_connection():
@@ -1237,7 +1238,8 @@ async def _sync_usenet_downloads(db: Session, tasks: list) -> int:
             port=client_config.port,
             username=client_config.username,
             password=client_config.password,
-            use_ssl=client_config.use_ssl
+            use_ssl=client_config.use_ssl,
+            url_base=client_config.url_base,
         )
 
         if not client.test_connection():
