@@ -557,6 +557,14 @@ export const settingsApi = {
 
   debugCacheKeys: () =>
     apiRequest<{ total_keys: number; sample_keys: string[]; namespace: string }>('/api/settings/cache/debug'),
+
+  browseDirectories: (path: string) =>
+    apiRequest<{
+      current_path: string;
+      parent_path: string | null;
+      directories: Array<{ name: string; path: string }>;
+      error: string | null;
+    }>(`/api/settings/browse-directories?path=${encodeURIComponent(path)}`),
 };
 
 // Readarr API endpoints
