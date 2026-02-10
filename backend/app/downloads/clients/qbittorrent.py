@@ -161,6 +161,7 @@ class QBittorrentClient:
         username: Optional[str] = None,
         password: Optional[str] = None,
         use_ssl: bool = False,
+        url_base: Optional[str] = None,
         category: Optional[str] = None,
         ebook_category: Optional[str] = None,
         audiobook_category: Optional[str] = None,
@@ -175,6 +176,7 @@ class QBittorrentClient:
             username: Web UI username
             password: Web UI password
             use_ssl: Use HTTPS connection
+            url_base: URL base path for reverse proxy (e.g., "/qbittorrent")
             category: Default/fallback category for downloads
             ebook_category: Category for ebook downloads (falls back to category)
             audiobook_category: Category for audiobook downloads (falls back to category)
@@ -191,6 +193,7 @@ class QBittorrentClient:
         self.username = username
         self.password = password
         self.use_ssl = use_ssl
+        self.url_base = url_base
         self.category = category
         self.ebook_category = ebook_category
         self.audiobook_category = audiobook_category
@@ -222,6 +225,8 @@ class QBittorrentClient:
             # Build the full URL with protocol
             protocol = "https" if self.use_ssl else "http"
             url = f"{protocol}://{self.host}:{self.port}"
+            if self.url_base:
+                url = f"{url}/{self.url_base.strip('/')}"
 
             self.client = QBClient(
                 host=url,

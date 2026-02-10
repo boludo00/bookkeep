@@ -105,6 +105,7 @@ class UsenetHandler(DownloadHandler):
                             port=client_config.port,
                             api_key=api_key,
                             use_ssl=client_config.use_ssl,
+                            url_base=client_config.url_base,
                             category=client_config.category,
                             path_mappings=path_mappings,
                         )
@@ -115,6 +116,7 @@ class UsenetHandler(DownloadHandler):
                             username=client_config.username,
                             password=client_config.password,
                             use_ssl=client_config.use_ssl,
+                            url_base=client_config.url_base,
                             category=client_config.category,
                             path_mappings=path_mappings,
                         )
