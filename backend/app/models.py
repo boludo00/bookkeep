@@ -190,6 +190,7 @@ class DownloadClient(Base):
     username = Column(String, nullable=True)
     password = Column(String, nullable=True)  # TODO: Encrypt this
     api_key = Column(String, nullable=True)  # API key for SABnzbd and similar clients
+    url_base = Column(String, nullable=True)  # URL base path for reverse proxy setups
 
     # Configuration
     enabled = Column(Boolean, default=True)
