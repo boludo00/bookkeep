@@ -42,6 +42,7 @@ class Book(Base):
     hardcover_slug = Column(String, nullable=True, index=True)
     booklore_id = Column(Integer, nullable=True, index=True, unique=True)
     booklore_added_on = Column(DateTime(timezone=True), nullable=True)
+    audiobookshelf_id = Column(String, nullable=True, index=True, unique=True)
     default_edition_id = Column(Integer, nullable=True)
     default_physical_edition_id = Column(Integer, nullable=True)
     default_ebook_edition_id = Column(Integer, nullable=True)
@@ -152,10 +153,26 @@ class BookloreServer(Base):
     username = Column(String, nullable=False)
     password = Column(String, nullable=False)  # Stored encrypted/hashed
     is_default = Column(Boolean, default=False)
+    # Library-to-format mapping (Booklore library IDs)
+    ebook_library_id = Column(Integer, nullable=True)
+    audiobook_library_id = Column(Integer, nullable=True)
     # Cached JWT tokens
     access_token = Column(Text, nullable=True)
     refresh_token = Column(Text, nullable=True)
     token_expires_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class AudiobookshelfServer(Base):
+    __tablename__ = "audiobookshelf_servers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    url = Column(String, nullable=False)  # Full URL like https://abs.example.com
+    api_key = Column(String, nullable=False)
+    is_default = Column(Boolean, default=False)
+    library_id = Column(String, nullable=True)  # ABS library UUID; null = scan all libraries
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

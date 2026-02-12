@@ -452,6 +452,8 @@ class BookloreServerBase(BaseModel):
     url: str  # Full URL like https://booklore.example.com
     username: str
     is_default: bool = False
+    ebook_library_id: Optional[int] = None
+    audiobook_library_id: Optional[int] = None
 
 class BookloreServerCreate(BookloreServerBase):
     password: str
@@ -462,6 +464,8 @@ class BookloreServerUpdate(BaseModel):
     username: Optional[str] = None
     password: Optional[str] = None
     is_default: Optional[bool] = None
+    ebook_library_id: Optional[int] = None
+    audiobook_library_id: Optional[int] = None
 
 class BookloreServerResponse(BookloreServerBase):
     id: int
@@ -480,6 +484,56 @@ class BookloreTestConnectionResponse(BaseModel):
     success: bool
     error: Optional[str] = None
     libraries: Optional[List[dict]] = None  # List of Booklore libraries
+
+# Audiobookshelf Server schemas
+class AudiobookshelfServerBase(BaseModel):
+    name: str
+    url: str  # Full URL like https://abs.example.com
+    is_default: bool = False
+    library_id: Optional[str] = None  # ABS library UUID; null = scan all libraries
+
+    @field_validator('url')
+    @classmethod
+    def validate_url(cls, v):
+        if not v.startswith(('http://', 'https://')):
+            raise ValueError('URL must start with http:// or https://')
+        return v.rstrip('/')
+
+class AudiobookshelfServerCreate(AudiobookshelfServerBase):
+    api_key: str
+
+class AudiobookshelfServerUpdate(BaseModel):
+    name: Optional[str] = None
+    url: Optional[str] = None
+    api_key: Optional[str] = None
+    is_default: Optional[bool] = None
+    library_id: Optional[str] = None
+
+    @field_validator('url')
+    @classmethod
+    def validate_url(cls, v):
+        if v is not None and not v.startswith(('http://', 'https://')):
+            raise ValueError('URL must start with http:// or https://')
+        return v.rstrip('/') if v else v
+
+class AudiobookshelfServerResponse(AudiobookshelfServerBase):
+    """Response schema — intentionally excludes api_key for security"""
+    id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+class AudiobookshelfTestConnectionRequest(BaseModel):
+    url: str
+    api_key: str
+
+class AudiobookshelfTestConnectionResponse(BaseModel):
+    success: bool
+    error: Optional[str] = None
+    libraries: Optional[List[dict]] = None  # List of Audiobookshelf libraries
+
 
 class BookloreBook(BaseModel):
     """Book from Booklore API"""
