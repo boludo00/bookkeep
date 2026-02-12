@@ -35,6 +35,7 @@ class NZBGetClient:
         username: Optional[str] = None,
         password: Optional[str] = None,
         use_ssl: bool = False,
+        url_base: Optional[str] = None,
         category: Optional[str] = None,
         path_mappings: Optional[Dict[str, str]] = None,
     ):
@@ -47,6 +48,7 @@ class NZBGetClient:
             username: NZBGet username
             password: NZBGet password
             use_ssl: Use HTTPS connection
+            url_base: URL base path for reverse proxy (e.g., "/nzbget")
             category: Default category for downloads
             path_mappings: Docker path mappings {"container_path": "host_path"}
         """
@@ -55,17 +57,19 @@ class NZBGetClient:
         self.username = username or ""
         self.password = password or ""
         self.use_ssl = use_ssl
+        self.url_base = url_base
         self.category = category
         self.path_mappings = path_mappings or {}
 
         # Build RPC URL
         protocol = "https" if use_ssl else "http"
+        base_path = f"/{self.url_base.strip('/')}" if self.url_base else ""
 
-        # URL with auth: http://username:password@host:port/jsonrpc
+        # URL with auth: http://username:password@host:port[/url_base]/jsonrpc
         if self.username and self.password:
-            self.rpc_url = f"{protocol}://{self.username}:{self.password}@{self.host}:{self.port}/jsonrpc"
+            self.rpc_url = f"{protocol}://{self.username}:{self.password}@{self.host}:{self.port}{base_path}/jsonrpc"
         else:
-            self.rpc_url = f"{protocol}://{self.host}:{self.port}/jsonrpc"
+            self.rpc_url = f"{protocol}://{self.host}:{self.port}{base_path}/jsonrpc"
 
         self.session = requests.Session()
         self.session.headers.update({"Content-Type": "application/json"})

@@ -88,6 +88,7 @@ class TorrentHandler(DownloadHandler):
                         username=client_config.username,
                         password=client_config.password,
                         use_ssl=client_config.use_ssl,
+                        url_base=client_config.url_base,
                         category=client_config.category,
                         ebook_category=client_config.ebook_category,
                         audiobook_category=client_config.audiobook_category,
