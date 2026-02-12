@@ -39,7 +39,7 @@ import {
 } from '@/components/ui/table';
 import { toast } from 'sonner';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { settingsApi, readarrApi, jobsApi, bookloreApi, downloadSettingsApi, type BookloreServer, type ProwlarrServer, type DownloadClient } from '@/lib/api';
+import { settingsApi, readarrApi, jobsApi, bookloreApi, audiobookshelfApi, downloadSettingsApi, type BookloreServer, type AudiobookshelfServer, type ProwlarrServer, type DownloadClient } from '@/lib/api';
 import { usePageVisibility } from '@/hooks/usePageVisibility';
 
 interface ReadarrServer {
@@ -80,6 +80,16 @@ interface BookloreServerForm {
   username: string;
   password: string;
   is_default: boolean;
+  ebook_library_id: number | null;
+  audiobook_library_id: number | null;
+}
+
+interface AudiobookshelfServerForm {
+  name: string;
+  url: string;
+  api_key: string;
+  is_default: boolean;
+  library_id: string | null;
 }
 
 function formatJobName(name: string): string {
@@ -164,14 +174,32 @@ export default function Settings() {
   const [showBooklorePassword, setShowBooklorePassword] = useState(false);
   const [testingBookloreConnection, setTestingBookloreConnection] = useState(false);
   const [bookloreTestResult, setBookloreTestResult] = useState<{ success: boolean; libraries?: any[]; error?: string } | null>(null);
+  const [bookloreLibraries, setBookloreLibraries] = useState<Array<{ id: number; name: string }>>([]);
   const [bookloreForm, setBookloreForm] = useState<BookloreServerForm>({
     name: '',
     url: '',
     username: '',
     password: '',
     is_default: false,
+    ebook_library_id: null,
+    audiobook_library_id: null,
   });
-  
+
+  // Audiobookshelf state
+  const [showAudiobookshelfModal, setShowAudiobookshelfModal] = useState(false);
+  const [editingAudiobookshelfServer, setEditingAudiobookshelfServer] = useState<AudiobookshelfServer | null>(null);
+  const [showAudiobookshelfApiKey, setShowAudiobookshelfApiKey] = useState(false);
+  const [testingAudiobookshelfConnection, setTestingAudiobookshelfConnection] = useState(false);
+  const [audiobookshelfTestResult, setAudiobookshelfTestResult] = useState<{ success: boolean; libraries?: any[]; error?: string } | null>(null);
+  const [audiobookshelfLibraries, setAudiobookshelfLibraries] = useState<Array<{ id: string; name: string; mediaType: string }>>([]);
+  const [audiobookshelfForm, setAudiobookshelfForm] = useState<AudiobookshelfServerForm>({
+    name: '',
+    url: '',
+    api_key: '',
+    is_default: false,
+    library_id: null,
+  });
+
   // Server form state
   const [serverForm, setServerForm] = useState({
     name: '',
@@ -241,6 +269,12 @@ export default function Settings() {
   const { data: bookloreServers = [], refetch: refetchBookloreServers } = useQuery({
     queryKey: ['booklore-servers'],
     queryFn: () => bookloreApi.getAll(),
+  });
+
+  // Fetch Audiobookshelf servers
+  const { data: audiobookshelfServers = [], refetch: refetchAudiobookshelfServers } = useQuery({
+    queryKey: ['audiobookshelf-servers'],
+    queryFn: () => audiobookshelfApi.getAll(),
   });
 
   // Fetch job interval options
@@ -586,9 +620,12 @@ export default function Settings() {
       username: '',
       password: '',
       is_default: false,
+      ebook_library_id: null,
+      audiobook_library_id: null,
     });
     setEditingBookloreServer(null);
     setBookloreTestResult(null);
+    setBookloreLibraries([]);
   };
 
   const handleAddBookloreServer = () => {
@@ -604,8 +641,126 @@ export default function Settings() {
       username: server.username,
       password: '', // Don't populate password for security
       is_default: server.is_default,
+      ebook_library_id: server.ebook_library_id,
+      audiobook_library_id: server.audiobook_library_id,
     });
     setShowBookloreModal(true);
+  };
+
+  // Audiobookshelf mutations
+  const saveAudiobookshelfServerMutation = useMutation({
+    mutationFn: (server: AudiobookshelfServerForm) => {
+      if (editingAudiobookshelfServer) {
+        return audiobookshelfApi.update(editingAudiobookshelfServer.id, server);
+      }
+      return audiobookshelfApi.create(server);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['audiobookshelf-servers'] });
+      toast.success(`Audiobookshelf server ${editingAudiobookshelfServer ? 'updated' : 'created'}!`);
+      setShowAudiobookshelfModal(false);
+      resetAudiobookshelfForm();
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to ${editingAudiobookshelfServer ? 'update' : 'create'} server`, {
+        description: error.message,
+      });
+    },
+  });
+
+  const deleteAudiobookshelfServerMutation = useMutation({
+    mutationFn: (id: number) => audiobookshelfApi.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['audiobookshelf-servers'] });
+      toast.success('Audiobookshelf server deleted!');
+    },
+    onError: (error: Error) => {
+      toast.error('Failed to delete server', {
+        description: error.message,
+      });
+    },
+  });
+
+  const resetAudiobookshelfForm = () => {
+    setAudiobookshelfForm({
+      name: '',
+      url: '',
+      api_key: '',
+      is_default: false,
+      library_id: null,
+    });
+    setEditingAudiobookshelfServer(null);
+    setAudiobookshelfTestResult(null);
+    setAudiobookshelfLibraries([]);
+    setShowAudiobookshelfApiKey(false);
+  };
+
+  const handleAddAudiobookshelfServer = () => {
+    resetAudiobookshelfForm();
+    setShowAudiobookshelfModal(true);
+  };
+
+  const handleEditAudiobookshelfServer = (server: AudiobookshelfServer) => {
+    setEditingAudiobookshelfServer(server);
+    setAudiobookshelfForm({
+      name: server.name,
+      url: server.url,
+      api_key: '', // Don't populate for security
+      is_default: server.is_default,
+      library_id: server.library_id,
+    });
+    setShowAudiobookshelfModal(true);
+  };
+
+  const handleTestAudiobookshelfConnection = async () => {
+    if (!audiobookshelfForm.url || !audiobookshelfForm.api_key) {
+      toast.error('Please fill in URL and API Key');
+      return;
+    }
+
+    setTestingAudiobookshelfConnection(true);
+    try {
+      const result = await audiobookshelfApi.testConnection({
+        url: audiobookshelfForm.url,
+        api_key: audiobookshelfForm.api_key,
+      });
+
+      setAudiobookshelfTestResult(result);
+      if (result.success) {
+        if (result.libraries) {
+          setAudiobookshelfLibraries(result.libraries);
+        }
+        toast.success('Connection successful!', {
+          description: `Found ${result.libraries?.length || 0} libraries`,
+        });
+      } else {
+        toast.error('Connection failed', {
+          description: result.error,
+        });
+      }
+    } catch (error: any) {
+      toast.error('Connection test failed', {
+        description: error.message,
+      });
+      setAudiobookshelfTestResult(null);
+    } finally {
+      setTestingAudiobookshelfConnection(false);
+    }
+  };
+
+  const handleSaveAudiobookshelfServer = () => {
+    if (!audiobookshelfForm.name || !audiobookshelfForm.url) {
+      toast.error('Please fill in required fields');
+      return;
+    }
+
+    // For new servers, api_key is required
+    if (!editingAudiobookshelfServer && !audiobookshelfForm.api_key) {
+      toast.error('API Key is required');
+      return;
+    }
+
+    saveAudiobookshelfServerMutation.mutate(audiobookshelfForm);
   };
 
   const handleTestBookloreConnection = async () => {
@@ -624,6 +779,9 @@ export default function Settings() {
 
       setBookloreTestResult(result);
       if (result.success) {
+        if (result.libraries) {
+          setBookloreLibraries(result.libraries);
+        }
         toast.success('Connection successful!', {
           description: `Found ${result.libraries?.length || 0} libraries`,
         });
@@ -1114,6 +1272,52 @@ export default function Settings() {
                   </div>
                 )}
 
+                {bookloreLibraries.length > 0 && (
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="booklore-ebook-library" className="text-foreground">eBook Library</Label>
+                      <Select
+                        value={bookloreForm.ebook_library_id != null ? String(bookloreForm.ebook_library_id) : "none"}
+                        onValueChange={(value) => setBookloreForm({ ...bookloreForm, ebook_library_id: value === "none" ? null : Number(value) })}
+                      >
+                        <SelectTrigger id="booklore-ebook-library" className="bg-secondary border-border">
+                          <SelectValue placeholder="Select library..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">None</SelectItem>
+                          {bookloreLibraries.map((lib) => (
+                            <SelectItem key={lib.id} value={String(lib.id)}>
+                              {lib.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">Maps this Booklore library to ebook format</p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="booklore-audiobook-library" className="text-foreground">Audiobook Library</Label>
+                      <Select
+                        value={bookloreForm.audiobook_library_id != null ? String(bookloreForm.audiobook_library_id) : "none"}
+                        onValueChange={(value) => setBookloreForm({ ...bookloreForm, audiobook_library_id: value === "none" ? null : Number(value) })}
+                      >
+                        <SelectTrigger id="booklore-audiobook-library" className="bg-secondary border-border">
+                          <SelectValue placeholder="Select library..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">None</SelectItem>
+                          {bookloreLibraries.map((lib) => (
+                            <SelectItem key={lib.id} value={String(lib.id)}>
+                              {lib.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">Maps this Booklore library to audiobook format</p>
+                    </div>
+                  </>
+                )}
+
                 <div className="flex justify-end gap-2 pt-4 border-t border-border">
                   <Button
                     variant="outline"
@@ -1130,6 +1334,214 @@ export default function Settings() {
                   >
                     <Save className="h-4 w-4 mr-2" />
                     {saveBookloreServerMutation.isPending ? 'Saving...' : editingBookloreServer ? 'Update' : 'Add Server'}
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          {/* Audiobookshelf Settings */}
+          <Card className="bg-card border-border">
+            <CardHeader>
+              <CardTitle className="text-foreground">Audiobookshelf</CardTitle>
+              <CardDescription>
+                Configure your Audiobookshelf server for audiobook availability detection. Audiobookshelf is the source of truth for audiobook library status.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Existing Audiobookshelf servers */}
+              {audiobookshelfServers.map((server: AudiobookshelfServer) => (
+                <div
+                  key={server.id}
+                  className="flex items-center justify-between p-4 border border-border rounded-lg bg-secondary/50"
+                >
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-medium text-foreground">{server.name}</span>
+                      {server.is_default && (
+                        <Badge variant="secondary" className="text-xs">Default</Badge>
+                      )}
+                    </div>
+                    <p className="text-sm text-muted-foreground">{server.url}</p>
+                    {server.library_id && (
+                      <p className="text-xs text-muted-foreground mt-1">Library: {server.library_id}</p>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleEditAudiobookshelfServer(server)}
+                    >
+                      <Edit className="h-4 w-4 mr-1" />
+                      Edit
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => deleteAudiobookshelfServerMutation.mutate(server.id)}
+                      disabled={deleteAudiobookshelfServerMutation.isPending}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+
+              {/* Add new Audiobookshelf server button */}
+              <button
+                onClick={handleAddAudiobookshelfServer}
+                className="w-full p-4 border-2 border-dashed border-border rounded-lg hover:border-primary/50 hover:bg-secondary/50 transition-colors flex items-center justify-center gap-2 text-muted-foreground hover:text-foreground"
+              >
+                <Plus className="h-5 w-5" />
+                Add Audiobookshelf Server
+              </button>
+            </CardContent>
+          </Card>
+
+          {/* Audiobookshelf Modal */}
+          <Dialog open={showAudiobookshelfModal} onOpenChange={setShowAudiobookshelfModal}>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>
+                  {editingAudiobookshelfServer ? 'Edit Audiobookshelf Server' : 'Add Audiobookshelf Server'}
+                </DialogTitle>
+                <DialogDescription>
+                  Configure your Audiobookshelf server connection
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="abs-name" className="text-foreground">Name *</Label>
+                  <Input
+                    id="abs-name"
+                    value={audiobookshelfForm.name}
+                    onChange={(e) => setAudiobookshelfForm({ ...audiobookshelfForm, name: e.target.value })}
+                    placeholder="e.g., Main Audiobookshelf"
+                    className="bg-secondary border-border"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="abs-url" className="text-foreground">URL *</Label>
+                  <Input
+                    id="abs-url"
+                    value={audiobookshelfForm.url}
+                    onChange={(e) => setAudiobookshelfForm({ ...audiobookshelfForm, url: e.target.value })}
+                    placeholder="https://audiobookshelf.example.com"
+                    className="bg-secondary border-border"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="abs-api-key" className="text-foreground">
+                    API Key {editingAudiobookshelfServer ? '(leave blank to keep current)' : '*'}
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      id="abs-api-key"
+                      type={showAudiobookshelfApiKey ? "text" : "password"}
+                      value={audiobookshelfForm.api_key}
+                      onChange={(e) => setAudiobookshelfForm({ ...audiobookshelfForm, api_key: e.target.value })}
+                      className="bg-secondary border-border pr-10"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="absolute right-0 top-0 h-full px-3"
+                      onClick={() => setShowAudiobookshelfApiKey(!showAudiobookshelfApiKey)}
+                    >
+                      {showAudiobookshelfApiKey ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="abs-default"
+                    checked={audiobookshelfForm.is_default}
+                    onCheckedChange={(checked) =>
+                      setAudiobookshelfForm({ ...audiobookshelfForm, is_default: checked === true })
+                    }
+                  />
+                  <Label htmlFor="abs-default" className="font-normal cursor-pointer">
+                    Default Server
+                  </Label>
+                </div>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleTestAudiobookshelfConnection}
+                  disabled={testingAudiobookshelfConnection || !audiobookshelfForm.url || !audiobookshelfForm.api_key}
+                  className="w-full"
+                >
+                  <TestTube className="h-4 w-4 mr-2" />
+                  {testingAudiobookshelfConnection ? 'Testing...' : 'Test Connection'}
+                </Button>
+
+                {audiobookshelfTestResult && (
+                  <div className={`p-3 rounded-lg ${audiobookshelfTestResult.success ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}`}>
+                    <div className="flex items-center gap-2">
+                      {audiobookshelfTestResult.success ? (
+                        <CheckCircle className="h-4 w-4" />
+                      ) : (
+                        <XCircle className="h-4 w-4" />
+                      )}
+                      <span className="text-sm">
+                        {audiobookshelfTestResult.success
+                          ? `Connected! Found ${audiobookshelfTestResult.libraries?.length || 0} libraries`
+                          : audiobookshelfTestResult.error}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {audiobookshelfLibraries.length > 0 && (
+                  <div className="space-y-2">
+                    <Label htmlFor="abs-library" className="text-foreground">Library</Label>
+                    <Select
+                      value={audiobookshelfForm.library_id ?? "none"}
+                      onValueChange={(value) => setAudiobookshelfForm({ ...audiobookshelfForm, library_id: value === "none" ? null : value })}
+                    >
+                      <SelectTrigger id="abs-library" className="bg-secondary border-border">
+                        <SelectValue placeholder="Select library..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">All Libraries</SelectItem>
+                        {audiobookshelfLibraries.map((lib) => (
+                          <SelectItem key={lib.id} value={lib.id}>
+                            {lib.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">Select a specific library or scan all libraries</p>
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-2 pt-4 border-t border-border">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setShowAudiobookshelfModal(false);
+                      resetAudiobookshelfForm();
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={handleSaveAudiobookshelfServer}
+                    disabled={saveAudiobookshelfServerMutation.isPending}
+                  >
+                    <Save className="h-4 w-4 mr-2" />
+                    {saveAudiobookshelfServerMutation.isPending ? 'Saving...' : editingAudiobookshelfServer ? 'Update' : 'Add Server'}
                   </Button>
                 </div>
               </div>
