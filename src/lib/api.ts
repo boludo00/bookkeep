@@ -557,6 +557,14 @@ export const settingsApi = {
 
   debugCacheKeys: () =>
     apiRequest<{ total_keys: number; sample_keys: string[]; namespace: string }>('/api/settings/cache/debug'),
+
+  browseDirectories: (path: string) =>
+    apiRequest<{
+      current_path: string;
+      parent_path: string | null;
+      directories: Array<{ name: string; path: string }>;
+      error: string | null;
+    }>(`/api/settings/browse-directories?path=${encodeURIComponent(path)}`),
 };
 
 // Readarr API endpoints
@@ -820,6 +828,7 @@ export interface DownloadClient {
   username: string | null;
   password: string;
   api_key: string | null;
+  url_base: string | null;
   enabled: boolean;
   priority: number;
   category: string | null;
@@ -877,13 +886,13 @@ export const downloadSettingsApi = {
   getDownloadClients: () =>
     apiRequest<Array<DownloadClient>>('/api/download-settings/download-clients'),
 
-  createDownloadClient: (client: { name: string; type: string; protocol: string; host: string; port: number; use_ssl?: boolean; username?: string; password?: string; api_key?: string; enabled?: boolean; priority?: number; category?: string; ebook_category?: string; audiobook_category?: string; path_mappings_json?: string }) =>
+  createDownloadClient: (client: { name: string; type: string; protocol: string; host: string; port: number; use_ssl?: boolean; username?: string; password?: string; api_key?: string; url_base?: string; enabled?: boolean; priority?: number; category?: string; ebook_category?: string; audiobook_category?: string; path_mappings_json?: string }) =>
     apiRequest<DownloadClient>('/api/download-settings/download-clients', {
       method: 'POST',
       body: JSON.stringify(client),
     }),
 
-  updateDownloadClient: (id: number, client: { name?: string; type?: string; protocol?: string; host?: string; port?: number; use_ssl?: boolean; username?: string; password?: string; api_key?: string; enabled?: boolean; priority?: number; category?: string; ebook_category?: string; audiobook_category?: string; path_mappings_json?: string }) =>
+  updateDownloadClient: (id: number, client: { name?: string; type?: string; protocol?: string; host?: string; port?: number; use_ssl?: boolean; username?: string; password?: string; api_key?: string; url_base?: string; enabled?: boolean; priority?: number; category?: string; ebook_category?: string; audiobook_category?: string; path_mappings_json?: string }) =>
     apiRequest<DownloadClient>(`/api/download-settings/download-clients/${id}`, {
       method: 'PUT',
       body: JSON.stringify(client),
@@ -894,7 +903,7 @@ export const downloadSettingsApi = {
       method: 'DELETE',
     }),
 
-  testDownloadClient: (config: { type: string; protocol: string; host: string; port: number; use_ssl: boolean; username?: string; password?: string; api_key?: string }) =>
+  testDownloadClient: (config: { type: string; protocol: string; host: string; port: number; use_ssl: boolean; username?: string; password?: string; api_key?: string; url_base?: string }) =>
     apiRequest<DownloadClientTestResponse>('/api/download-settings/download-clients/test', {
       method: 'POST',
       body: JSON.stringify(config),

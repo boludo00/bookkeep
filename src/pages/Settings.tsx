@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Save, TestTube, CheckCircle, XCircle, Eye, EyeOff, Lock, Plus, Edit, Trash2, RefreshCw, Play, Clock, Database } from 'lucide-react';
 import ProwlarrSettings from '@/components/settings/ProwlarrSettings';
 import DownloadClientsSettings from '@/components/settings/DownloadClientsSettings';
+import DirectoryPicker from '@/components/settings/DirectoryPicker';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -1057,13 +1058,11 @@ export default function Settings() {
                 <Label htmlFor="ebook-path" className="text-foreground">
                   eBook Download Path
                 </Label>
-                <Input
+                <DirectoryPicker
                   id="ebook-path"
-                  type="text"
                   placeholder="/path/to/ebooks"
                   value={ebookDownloadPath}
-                  onChange={(e) => setEbookDownloadPath(e.target.value)}
-                  className="bg-secondary border-border font-mono text-sm"
+                  onChange={setEbookDownloadPath}
                 />
                 <p className="text-xs text-muted-foreground">
                   The directory where eBooks will be downloaded
@@ -1073,13 +1072,11 @@ export default function Settings() {
                 <Label htmlFor="audiobook-path" className="text-foreground">
                   Audiobook Download Path
                 </Label>
-                <Input
+                <DirectoryPicker
                   id="audiobook-path"
-                  type="text"
                   placeholder="/path/to/audiobooks"
                   value={audiobookDownloadPath}
-                  onChange={(e) => setAudiobookDownloadPath(e.target.value)}
-                  className="bg-secondary border-border font-mono text-sm"
+                  onChange={setAudiobookDownloadPath}
                 />
                 <p className="text-xs text-muted-foreground">
                   The directory where audiobooks will be downloaded

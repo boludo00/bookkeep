@@ -34,6 +34,7 @@ interface DownloadClientForm {
   username: string;
   password: string;
   api_key: string;
+  url_base: string;
   enabled: boolean;
   priority: number;
   category: string;
@@ -58,6 +59,7 @@ export default function DownloadClientsSettings() {
     username: '',
     password: '',
     api_key: '',
+    url_base: '',
     enabled: true,
     priority: 0,
     category: 'books',
@@ -120,6 +122,7 @@ export default function DownloadClientsSettings() {
       username: '',
       password: '',
       api_key: '',
+      url_base: '',
       enabled: true,
       priority: 0,
       category: 'books',
@@ -147,6 +150,7 @@ export default function DownloadClientsSettings() {
       username: client.username || '',
       password: '', // Don't populate password for security
       api_key: '', // Don't populate API key for security
+      url_base: client.url_base || '',
       enabled: client.enabled,
       priority: client.priority,
       category: client.category || 'books',
@@ -170,6 +174,7 @@ export default function DownloadClientsSettings() {
         username: form.username || undefined,
         password: form.password || undefined,
         api_key: form.api_key || undefined,
+        url_base: form.url_base || undefined,
       });
 
       setTestResult(result);
@@ -376,6 +381,20 @@ export default function DownloadClientsSettings() {
                   className="bg-secondary border-border"
                 />
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="client-url-base" className="text-foreground">URL Base</Label>
+              <Input
+                id="client-url-base"
+                value={form.url_base}
+                onChange={(e) => setForm({ ...form, url_base: e.target.value })}
+                placeholder={`/${form.type}`}
+                className="bg-secondary border-border"
+              />
+              <p className="text-xs text-muted-foreground">
+                Optional path prefix when behind a reverse proxy (e.g., /qbittorrent)
+              </p>
             </div>
 
             {/* Username field: qBittorrent and NZBGet */}
