@@ -11,6 +11,14 @@ services:
       DATABASE_URL: postgresql://bookhound:bookhound_password@db:5432/bookhound_db
       HARDCOVER_API_TOKEN: ${HARDCOVER_API_TOKEN:-}
       REDIS_URL: redis://redis:6379/0
+      BOOKKEEP_SECRET_KEY: ${BOOKKEEP_SECRET_KEY:-}
+    # volumes:
+    #   # Mount host download directories so Bookkeep can access completed downloads.
+    #   # Adjust the left side (host path) to match your download client's output directory.
+    #   - /path/to/downloads:/downloads
+    #   # Example: separate mounts for different media types
+    #   # - /data/media/ebooks:/downloads/ebooks
+    #   # - /data/media/audiobooks:/downloads/audiobooks
     ports:
       - "8000:8000"
     depends_on:
@@ -40,19 +48,6 @@ services:
       - redis_data:/data
     restart: unless-stopped
 
-# Optional: Uncomment if you want Redis caching
-#  redis:
-#    image: redis:7-alpine
-#    container_name: book-hound-redis
-#    volumes:
-#      - redis_data:/data
-#    networks:
-#      - book-hound-network
-
 volumes:
   postgres_data:
   redis_data:
-
-# networks:
-#   book-hound-network:
-#     driver: bridge

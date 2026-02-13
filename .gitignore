@@ -39,6 +39,9 @@ dist-ssr
 *.pyzwzw
 *.pyzwzwzw
 
+# Dev compose override (personal paths/config)
+dev.docker-compose.yml
+
 # Single-container deployment
 data/
 frontend_dist/

@@ -695,6 +695,8 @@ export interface BookloreServer {
   url: string;
   username: string;
   is_default: boolean;
+  ebook_library_id: number | null;
+  audiobook_library_id: number | null;
   created_at: string;
   updated_at?: string;
 }
@@ -712,13 +714,13 @@ export const bookloreApi = {
   getById: (id: number) =>
     apiRequest<BookloreServer>(`/api/booklore/${id}`),
 
-  create: (server: { name: string; url: string; username: string; password: string; is_default?: boolean }) =>
+  create: (server: { name: string; url: string; username: string; password: string; is_default?: boolean; ebook_library_id?: number | null; audiobook_library_id?: number | null }) =>
     apiRequest<BookloreServer>('/api/booklore/', {
       method: 'POST',
       body: JSON.stringify(server),
     }),
 
-  update: (id: number, server: { name?: string; url?: string; username?: string; password?: string; is_default?: boolean }) =>
+  update: (id: number, server: { name?: string; url?: string; username?: string; password?: string; is_default?: boolean; ebook_library_id?: number | null; audiobook_library_id?: number | null }) =>
     apiRequest<BookloreServer>(`/api/booklore/${id}`, {
       method: 'PUT',
       body: JSON.stringify(server),
@@ -740,6 +742,57 @@ export const bookloreApi = {
 
   checkBook: (serverId: number, hardcoverId: number) =>
     apiRequest<{ available: boolean; book?: any }>(`/api/booklore/${serverId}/check/${hardcoverId}`),
+};
+
+// Audiobookshelf API endpoints
+export interface AudiobookshelfServer {
+  id: number;
+  name: string;
+  url: string;
+  is_default: boolean;
+  library_id: string | null;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface AudiobookshelfTestResponse {
+  success: boolean;
+  error?: string;
+  libraries?: Array<{ id: string; name: string; mediaType: string }>;
+}
+
+export const audiobookshelfApi = {
+  getAll: () =>
+    apiRequest<Array<AudiobookshelfServer>>('/api/audiobookshelf/'),
+
+  getById: (id: number) =>
+    apiRequest<AudiobookshelfServer>(`/api/audiobookshelf/${id}`),
+
+  create: (server: { name: string; url: string; api_key: string; is_default?: boolean; library_id?: string | null }) =>
+    apiRequest<AudiobookshelfServer>('/api/audiobookshelf/', {
+      method: 'POST',
+      body: JSON.stringify(server),
+    }),
+
+  update: (id: number, server: { name?: string; url?: string; api_key?: string; is_default?: boolean; library_id?: string | null }) =>
+    apiRequest<AudiobookshelfServer>(`/api/audiobookshelf/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(server),
+    }),
+
+  delete: (id: number) =>
+    apiRequest<void>(`/api/audiobookshelf/${id}`, {
+      method: 'DELETE',
+    }),
+
+  testConnection: (config: { url: string; api_key: string }) =>
+    apiRequest<AudiobookshelfTestResponse>('/api/audiobookshelf/test', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    }),
+
+  getItems: (serverId: number) =>
+    apiRequest<Array<any>>(`/api/audiobookshelf/${serverId}/items`),
 };
 
 // Download Settings API endpoints

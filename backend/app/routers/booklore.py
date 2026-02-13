@@ -263,7 +263,9 @@ async def create_server(
         url=server.url,
         username=server.username,
         password=server.password,
-        is_default=server.is_default
+        is_default=server.is_default,
+        ebook_library_id=server.ebook_library_id,
+        audiobook_library_id=server.audiobook_library_id,
     )
     db.add(db_server)
     db.commit()

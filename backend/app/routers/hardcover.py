@@ -815,22 +815,21 @@ async def lookup_book_by_title_author(title: str, author: str = None, db: Sessio
     
     query = """
     query SearchBooks($query: String!) {
-      search(query: $query, query_type: "Book", per_page: 5, page: 1) {
-        results {
-          ... on Book {
-            document
-          }
-        }
+      search(query: $query) {
+        error
+        results
       }
     }
     """
-    
+
     try:
         result = await execute_graphql(query, {"query": search_query}, db)
-        results = result.get("search", {}).get("results", [])
-        
-        for res in results:
-            doc = res.get("document", {})
+        search_response = result.get("search", {})
+        results_obj = search_response.get("results", {}) if isinstance(search_response, dict) else {}
+        hits = results_obj.get("hits", []) if isinstance(results_obj, dict) else []
+
+        for hit in hits[:5]:
+            doc = hit.get("document", {})
             if doc and doc.get("id"):
                 # Found a match - now fetch full details
                 book_id = doc.get("id")
