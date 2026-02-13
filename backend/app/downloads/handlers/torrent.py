@@ -186,9 +186,8 @@ class TorrentHandler(DownloadHandler):
                 # This respects the user's format-specific qBittorrent category configuration
                 category = client.get_category_for_format(task.format)
 
-                # Add torrent with unique tag to identify it later
-                # Use task_id as unique identifier to avoid race conditions
-                unique_tag = f"bookkeep-{task.id}"
+                # Add torrent with static tag to identify Bookkeep downloads
+                unique_tag = "bookkeep"
 
                 if task.download_url.startswith("magnet:"):
                     info_hash = client.add_torrent(magnet=task.download_url, category=category, tags=[unique_tag])
