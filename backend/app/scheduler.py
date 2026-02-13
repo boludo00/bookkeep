@@ -33,6 +33,11 @@ JOB_DEFINITIONS = {
         "description": "Import books from Booklore library",
         "type": "PROCESS",
     },
+    "sync_from_audiobookshelf": {
+        "default_interval": 24 * 60 * 60,  # 24 hours
+        "description": "Import audiobooks from Audiobookshelf library",
+        "type": "PROCESS",
+    },
     "sync_missing_metadata": {
         "default_interval": 6 * 60 * 60,  # 6 hours
         "description": "Fetch missing book metadata from Hardcover",
@@ -285,6 +290,7 @@ async def initialize_jobs():
         refresh_seed_data,
         check_processing_requests,
         sync_from_booklore,
+        sync_from_audiobookshelf,
         sync_missing_metadata,
         sync_download_states,
     )
@@ -294,6 +300,7 @@ async def initialize_jobs():
         "refresh_seed_data": refresh_seed_data,
         "check_processing_requests": check_processing_requests,
         "sync_from_booklore": sync_from_booklore,
+        "sync_from_audiobookshelf": sync_from_audiobookshelf,
         "sync_missing_metadata": sync_missing_metadata,
         "sync_download_states": sync_download_states,
     }

@@ -5,7 +5,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import or_, func as sa_func
 from app.database import SessionLocal
 from app.models import Book
 from app import schemas
@@ -436,10 +436,15 @@ async def sync_from_booklore():
             authors_list = metadata.get("authors") or []
             author = ", ".join(authors_list) if authors_list else "Unknown Author"
             
-            # Determine format from Booklore book type
+            # Determine format from Booklore book type and library mapping
             book_type = bl_book.get("bookType", "").lower()
+            bl_library_id = bl_book.get("libraryId")
             if "audio" in book_type:
                 format_type = "audiobook"
+            elif bl_library_id and booklore_server.audiobook_library_id and bl_library_id == booklore_server.audiobook_library_id:
+                format_type = "audiobook"
+            elif bl_library_id and booklore_server.ebook_library_id and bl_library_id == booklore_server.ebook_library_id:
+                format_type = "ebook"
             else:
                 format_type = "ebook"
 
@@ -868,6 +873,214 @@ async def run_background_booklore_sync():
         await asyncio.sleep(interval)
 
 
+async def sync_from_audiobookshelf():
+    """
+    Sync audiobook availability from Audiobookshelf.
+    - Imports audiobooks from Audiobookshelf into the local database
+    - Updates existing books with audiobookshelf_id links
+    - Marks matching requests as "available"
+    """
+    from app.routers.audiobookshelf import get_default_audiobookshelf_server, get_all_audiobookshelf_items
+    from app.routers.hardcover import lookup_book_by_title_author
+    from app.models import BookRequest, User
+
+    db: Session = SessionLocal()
+    try:
+        abs_server = get_default_audiobookshelf_server(db)
+
+        if not abs_server:
+            logger.info("sync_from_audiobookshelf_skipped", reason="no_audiobookshelf_server")
+            return
+
+        logger.info("sync_from_audiobookshelf_starting", server_name=abs_server.name)
+
+        items = await get_all_audiobookshelf_items(abs_server)
+
+        if not items:
+            logger.info("sync_from_audiobookshelf_skipped", reason="no_items_in_audiobookshelf")
+            return
+
+        logger.info("sync_from_audiobookshelf_fetched", count=len(items))
+
+        updated_count = 0
+        skipped_count = 0
+        books_created = 0
+        books_updated = 0
+
+        for item in items:
+            item_id = item.get("id")
+            media = item.get("media", {})
+            metadata = media.get("metadata", {})
+
+            title = metadata.get("title") or "Unknown Title"
+            author = metadata.get("authorName") or "Unknown Author"
+            isbn = metadata.get("isbn")
+
+            # Fast path: already linked by audiobookshelf_id
+            if item_id:
+                existing_by_abs_id = db.query(Book).filter(Book.audiobookshelf_id == item_id).first()
+                if existing_by_abs_id:
+                    existing_by_abs_id.audiobook_available = True
+                    existing_by_abs_id.last_refreshed = datetime.now(timezone.utc)
+                    db.add(existing_by_abs_id)
+
+                    existing_request = db.query(BookRequest).filter(
+                        BookRequest.book_id == existing_by_abs_id.id,
+                        BookRequest.format == "audiobook"
+                    ).first()
+                    if existing_request and existing_request.status in ("processing", "approved", "pending"):
+                        existing_request.status = "available"
+                        existing_request.updated_at = datetime.now(timezone.utc)
+                        updated_count += 1
+
+                    try:
+                        db.commit()
+                    except Exception as commit_error:
+                        logger.warning("audiobookshelf_book_commit_failed",
+                                     title=existing_by_abs_id.title,
+                                     error=str(commit_error))
+                        db.rollback()
+                    continue
+
+            # Try ISBN match
+            db_book = None
+            if isbn:
+                db_book = db.query(Book).filter(Book.isbn == isbn).first()
+
+            # Try title + author match (case-insensitive)
+            if not db_book and title and author:
+                db_book = db.query(Book).filter(
+                    sa_func.lower(Book.title) == title.lower(),
+                    sa_func.lower(Book.author) == author.lower()
+                ).first()
+
+            # Try Hardcover lookup by title+author
+            if not db_book:
+                try:
+                    hardcover_data = await lookup_book_by_title_author(title, author, db)
+                    await asyncio.sleep(0.5)
+
+                    if hardcover_data:
+                        hardcover_id_int = hardcover_data.get("id")
+                        if hardcover_id_int:
+                            db_book = db.query(Book).filter(Book.hardcover_id == hardcover_id_int).first()
+
+                            if not db_book:
+                                # Create new book from Hardcover data
+                                description = hardcover_data.get("description")
+                                cached_image = hardcover_data.get("cached_image")
+                                cover_url = cached_image.get("url") if isinstance(cached_image, dict) else None
+                                page_count = hardcover_data.get("pages")
+                                published_date = hardcover_data.get("release_date") or str(hardcover_data.get("release_year", ""))
+                                rating = hardcover_data.get("rating")
+                                hardcover_slug = hardcover_data.get("slug")
+
+                                # Series info
+                                series_name = None
+                                series_id = None
+                                series_position = None
+                                book_series = hardcover_data.get("book_series", [])
+                                if book_series:
+                                    first_series = book_series[0]
+                                    series_info = first_series.get("series", {})
+                                    series_name = series_info.get("name")
+                                    series_id = series_info.get("id")
+                                    series_position = first_series.get("position")
+
+                                # Contributors
+                                contributions = hardcover_data.get("contributions", [])
+                                if contributions:
+                                    author_names = [c.get("author", {}).get("name") for c in contributions if c.get("author", {}).get("name")]
+                                    if author_names:
+                                        author = ", ".join(author_names)
+
+                                # Genres
+                                taggings = hardcover_data.get("taggings", [])
+                                genres = ", ".join([t.get("tag", {}).get("tag", "") for t in taggings if t.get("tag", {}).get("tag")])
+
+                                db_book = Book(
+                                    title=title,
+                                    author=author,
+                                    description=description,
+                                    cover_url=cover_url,
+                                    isbn=isbn,
+                                    page_count=page_count,
+                                    published_date=published_date,
+                                    hardcover_id=hardcover_id_int,
+                                    hardcover_slug=hardcover_slug,
+                                    audiobookshelf_id=item_id,
+                                    series=series_name,
+                                    series_id=series_id,
+                                    series_position=series_position,
+                                    rating=rating,
+                                    ratings_count=hardcover_data.get("ratings_count"),
+                                    users_count=hardcover_data.get("users_count"),
+                                    genres=genres or None,
+                                    audiobook_available=True,
+                                )
+                                db.add(db_book)
+                                try:
+                                    db.flush()
+                                    books_created += 1
+                                    logger.info("audiobookshelf_book_created",
+                                              hardcover_id=hardcover_id_int,
+                                              title=title)
+                                except Exception as flush_error:
+                                    db.rollback()
+                                    logger.warning("audiobookshelf_book_create_failed",
+                                                 title=title,
+                                                 error=str(flush_error))
+                                    continue
+                except Exception as e:
+                    logger.warning("audiobookshelf_hardcover_lookup_failed",
+                                 title=title,
+                                 error=str(e))
+
+            if not db_book:
+                skipped_count += 1
+                continue
+
+            # Update existing book
+            if item_id:
+                db_book.audiobookshelf_id = item_id
+            db_book.audiobook_available = True
+            db_book.last_refreshed = datetime.now(timezone.utc)
+            db.add(db_book)
+            books_updated += 1
+
+            # Update matching requests
+            existing_request = db.query(BookRequest).filter(
+                BookRequest.book_id == db_book.id,
+                BookRequest.format == "audiobook"
+            ).first()
+
+            if existing_request and existing_request.status in ("processing", "approved", "pending"):
+                existing_request.status = "available"
+                existing_request.updated_at = datetime.now(timezone.utc)
+                updated_count += 1
+
+            try:
+                db.commit()
+            except Exception as commit_error:
+                logger.warning("audiobookshelf_book_commit_failed",
+                             title=title,
+                             error=str(commit_error))
+                db.rollback()
+
+        logger.info("sync_from_audiobookshelf_complete",
+                   audiobookshelf_items=len(items),
+                   books_created=books_created,
+                   books_updated=books_updated,
+                   requests_updated=updated_count,
+                   skipped=skipped_count)
+
+    except Exception as e:
+        logger.error("sync_from_audiobookshelf_error", error=str(e))
+        db.rollback()
+    finally:
+        db.close()
+
+
 async def run_background_metadata_sync():
     """Background task to sync missing metadata periodically"""
     job_name = "sync_missing_metadata"
@@ -899,6 +1112,7 @@ def get_job_interval(job_name: str, db: Session) -> int:
         "refresh_seed_data": 24 * 60 * 60,
         "check_processing_requests": 5 * 60,
         "sync_from_booklore": 24 * 60 * 60,
+        "sync_from_audiobookshelf": 24 * 60 * 60,
         "sync_missing_metadata": 6 * 60 * 60,
     }
     

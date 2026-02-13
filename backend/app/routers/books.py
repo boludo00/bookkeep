@@ -5,97 +5,99 @@ from datetime import datetime, timezone
 import structlog
 import httpx
 from app import database, models, schemas, cache
-from app.services.readarr_service import ReadarrClient
 
 logger = structlog.get_logger()
 router = APIRouter()
 
 
-def _get_readarr_url(server: models.ReadarrServer) -> str:
-    """Build the Readarr API URL from server config."""
-    protocol = "https" if server.use_ssl else "http"
-    url_base = server.url_base.strip('/') if server.url_base else ""
-    if url_base:
-        return f"{protocol}://{server.hostname}:{server.port}/{url_base}/api/v1"
-    return f"{protocol}://{server.hostname}:{server.port}/api/v1"
-
-
 async def check_book_availability(book: models.Book, db: Session) -> dict:
-    """Check if a book exists in Readarr or Booklore and update availability flags."""
-    ebook_available = False
-    audiobook_available = False
+    """Check if a book exists in Booklore or Audiobookshelf and update availability flags."""
+    # Preserve existing availability — only set True, never reset to False
+    ebook_available = bool(book.ebook_available)
+    audiobook_available = bool(book.audiobook_available)
     checked_sources = []
-    
-    # Get Readarr servers
-    readarr_servers = db.query(models.ReadarrServer).filter(
-        models.ReadarrServer.is_default == True
-    ).all()
-    if not readarr_servers:
-        readarr_servers = db.query(models.ReadarrServer).all()
-    
-    for server in readarr_servers:
-        try:
-            readarr_client = ReadarrClient.from_server(server)
-            async with readarr_client.session(timeout=10.0) as client:
-                if book.hardcover_id:
-                    book_data = await readarr_client.find_book_in_library(client, book.hardcover_id)
-                    if book_data:
-                        stats = book_data.get("statistics", {})
-                        file_count = stats.get("bookFileCount", 0)
-                        if file_count > 0:
-                            if server.is_audiobook:
-                                audiobook_available = True
-                                checked_sources.append(f"readarr_audiobook:{server.name}")
-                            else:
-                                ebook_available = True
-                                checked_sources.append(f"readarr_ebook:{server.name}")
-        except Exception as e:
-            logger.warning("readarr_availability_check_failed",
-                          server_id=server.id,
-                          book_id=book.id,
-                          error=str(e))
-    
+
     # Check Booklore
     booklore_server = db.query(models.BookloreServer).filter(
         models.BookloreServer.is_default == True
     ).first()
-    
+
     if booklore_server and book.hardcover_id:
         try:
             # Get or refresh token
             from app.routers.booklore import get_booklore_token
             token = await get_booklore_token(booklore_server, db)
-            
+
             if token:
                 async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
                     headers = {"Authorization": f"Bearer {token}"}
-                    
+
                     # Check by hardcover ID
                     response = await client.get(
                         f"{booklore_server.url}/api/v1/books",
                         headers=headers,
                         params={"withDescription": "false"}
                     )
-                    
+
                     if response.status_code == 200:
                         books_data = response.json()
                         for bl_book in books_data:
                             metadata = bl_book.get("metadata", {})
                             bl_hardcover_id = metadata.get("hardcoverId")
-                            
+
                             # Check if hardcover ID matches (numeric or slug)
                             if bl_hardcover_id:
                                 if str(bl_hardcover_id) == str(book.hardcover_id) or \
                                    str(bl_hardcover_id) == str(book.hardcover_slug):
-                                    # Found in Booklore - mark ebook as available
-                                    ebook_available = True
+                                    # Determine format from bookType and library mapping
+                                    book_type = bl_book.get("bookType", "").lower()
+                                    bl_library_id = bl_book.get("libraryId")
+
+                                    if "audio" in book_type:
+                                        audiobook_available = True
+                                    elif bl_library_id and booklore_server.audiobook_library_id and bl_library_id == booklore_server.audiobook_library_id:
+                                        audiobook_available = True
+                                    elif bl_library_id and booklore_server.ebook_library_id and bl_library_id == booklore_server.ebook_library_id:
+                                        ebook_available = True
+                                    else:
+                                        # Default: if no bookType or library mapping, mark as ebook
+                                        ebook_available = True
+
                                     checked_sources.append(f"booklore:{booklore_server.name}")
-                                    break
+                                    # Don't break — same book may exist in multiple libraries
         except Exception as e:
             logger.warning("booklore_availability_check_failed",
                           book_id=book.id,
                           error=str(e))
-    
+
+    # Check Audiobookshelf
+    from app.routers.audiobookshelf import (
+        get_default_audiobookshelf_server, search_audiobookshelf_items, match_book_to_abs_item,
+    )
+    abs_server = get_default_audiobookshelf_server(db)
+
+    if abs_server and book.hardcover_id:
+        try:
+            # Fast path: already linked
+            if book.audiobookshelf_id:
+                audiobook_available = True
+                checked_sources.append(f"audiobookshelf:{abs_server.name}")
+            else:
+                search_query = book.title or ""
+                if book.author:
+                    search_query = f"{search_query} {book.author}"
+                items = await search_audiobookshelf_items(abs_server, search_query.strip())
+                for item in items:
+                    if match_book_to_abs_item(book, item):
+                        book.audiobookshelf_id = item.get("id")
+                        audiobook_available = True
+                        checked_sources.append(f"audiobookshelf:{abs_server.name}")
+                        break
+        except Exception as e:
+            logger.warning("audiobookshelf_availability_check_failed",
+                          book_id=book.id,
+                          error=str(e))
+
     # Update book availability
     book.ebook_available = ebook_available
     book.audiobook_available = audiobook_available
@@ -297,7 +299,7 @@ def delete_book(book_id: int, db: Session = Depends(database.get_db)):
 
 @router.post("/{book_id}/refresh")
 async def refresh_book_availability(book_id: int, db: Session = Depends(database.get_db)):
-    """Refresh availability status for a single book by checking Readarr and Booklore."""
+    """Refresh availability status for a single book by checking Booklore and Audiobookshelf."""
     db_book = db.query(models.Book).filter(models.Book.id == book_id).first()
     if not db_book:
         raise HTTPException(
