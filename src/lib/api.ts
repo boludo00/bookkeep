@@ -533,9 +533,9 @@ export const settingsApi = {
     }),
 
   getDownloadPaths: () =>
-    apiRequest<{ ebook_download_path: string | null; audiobook_download_path: string | null }>('/api/settings/download-paths'),
+    apiRequest<{ ebook_download_path: string | null; audiobook_download_path: string | null; use_hardlinks: boolean }>('/api/settings/download-paths'),
 
-  updateDownloadPaths: (paths: { ebook_download_path?: string; audiobook_download_path?: string }) =>
+  updateDownloadPaths: (paths: { ebook_download_path?: string; audiobook_download_path?: string; use_hardlinks?: boolean }) =>
     apiRequest<{ message: string }>('/api/settings/download-paths', {
       method: 'PUT',
       body: JSON.stringify(paths),

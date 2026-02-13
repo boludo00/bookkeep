@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import { Save, TestTube, CheckCircle, XCircle, Eye, EyeOff, Lock, Plus, Edit, Trash2, RefreshCw, Play, Clock, Database } from 'lucide-react';
+import { Save, TestTube, CheckCircle, XCircle, Eye, EyeOff, Lock, Plus, Edit, Trash2, RefreshCw, Play, Clock, Database, Link } from 'lucide-react';
 import ProwlarrSettings from '@/components/settings/ProwlarrSettings';
 import DownloadClientsSettings from '@/components/settings/DownloadClientsSettings';
 import DirectoryPicker from '@/components/settings/DirectoryPicker';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -157,6 +158,7 @@ export default function Settings() {
   const [hardcoverToken, setHardcoverToken] = useState('');
   const [ebookDownloadPath, setEbookDownloadPath] = useState('');
   const [audiobookDownloadPath, setAudiobookDownloadPath] = useState('');
+  const [useHardlinks, setUseHardlinks] = useState(true);
   const [clearingCache, setClearingCache] = useState<string | null>(null);
   const [showServerModal, setShowServerModal] = useState(false);
   const [editingServer, setEditingServer] = useState<ReadarrServer | null>(null);
@@ -303,6 +305,7 @@ export default function Settings() {
     if (downloadPaths) {
       setEbookDownloadPath(downloadPaths.ebook_download_path || '');
       setAudiobookDownloadPath(downloadPaths.audiobook_download_path || '');
+      setUseHardlinks(downloadPaths.use_hardlinks);
     }
   }, [downloadPaths]);
 
@@ -325,6 +328,7 @@ export default function Settings() {
     mutationFn: () => settingsApi.updateDownloadPaths({
       ebook_download_path: ebookDownloadPath || undefined,
       audiobook_download_path: audiobookDownloadPath || undefined,
+      use_hardlinks: useHardlinks,
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['download-paths'] });
@@ -1081,6 +1085,24 @@ export default function Settings() {
                 <p className="text-xs text-muted-foreground">
                   The directory where audiobooks will be downloaded
                 </p>
+              </div>
+              <div className="flex items-center justify-between rounded-lg border border-border p-4">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <Link className="h-4 w-4 text-muted-foreground" />
+                    <Label htmlFor="use-hardlinks" className="text-foreground font-medium">
+                      Use hardlinks when importing
+                    </Label>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    When enabled, files are hardlinked to the destination (saves disk space). Disable this if your setup uses separate filesystems, NAS mounts, or Docker volumes where hardlinks are not supported.
+                  </p>
+                </div>
+                <Switch
+                  id="use-hardlinks"
+                  checked={useHardlinks}
+                  onCheckedChange={setUseHardlinks}
+                />
               </div>
               <div className="flex justify-end">
                 <Button

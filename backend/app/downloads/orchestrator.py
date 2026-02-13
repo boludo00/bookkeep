@@ -497,35 +497,58 @@ class DownloadOrchestrator:
                 db.commit()
                 return str(dest_path)
 
-            # Try to hardlink first (fast, no extra space), fall back to copy
-            try:
-                if source.is_file():
-                    # Hardlink single file
-                    os.link(str(source), str(dest_path))
-                    logger.info(
-                        "orchestrator_hardlink_success",
-                        task_id=task.id,
-                        source=str(source),
-                        dest=str(dest_path)
-                    )
-                else:
-                    # For directories, try to hardlink all files
-                    shutil.copytree(str(source), str(dest_path), copy_function=os.link)
-                    logger.info(
-                        "orchestrator_hardlink_dir_success",
-                        task_id=task.id,
-                        source=str(source),
-                        dest=str(dest_path)
-                    )
-            except (OSError, PermissionError) as e:
-                # Hardlink failed (maybe cross-device), fall back to copy
-                logger.info(
-                    "orchestrator_hardlink_failed_copying",
-                    task_id=task.id,
-                    error=str(e),
-                    message="Hardlink failed, falling back to copy"
-                )
+            # Check if hardlinks are enabled (default: true)
+            use_hardlinks_setting = db.query(AppSettings).filter(
+                AppSettings.key == "use_hardlinks"
+            ).first()
+            use_hardlinks = not (use_hardlinks_setting and use_hardlinks_setting.value == "false")
 
+            if use_hardlinks:
+                # Try to hardlink first (fast, no extra space), fall back to copy
+                try:
+                    if source.is_file():
+                        os.link(str(source), str(dest_path))
+                        logger.info(
+                            "orchestrator_hardlink_success",
+                            task_id=task.id,
+                            source=str(source),
+                            dest=str(dest_path)
+                        )
+                    else:
+                        shutil.copytree(str(source), str(dest_path), copy_function=os.link)
+                        logger.info(
+                            "orchestrator_hardlink_dir_success",
+                            task_id=task.id,
+                            source=str(source),
+                            dest=str(dest_path)
+                        )
+                except (OSError, PermissionError) as e:
+                    # Hardlink failed (maybe cross-device), fall back to copy
+                    logger.info(
+                        "orchestrator_hardlink_failed_copying",
+                        task_id=task.id,
+                        error=str(e),
+                        message="Hardlink failed, falling back to copy"
+                    )
+
+                    if source.is_file():
+                        shutil.copy2(str(source), str(dest_path))
+                        logger.info(
+                            "orchestrator_copy_success",
+                            task_id=task.id,
+                            source=str(source),
+                            dest=str(dest_path)
+                        )
+                    else:
+                        shutil.copytree(str(source), str(dest_path))
+                        logger.info(
+                            "orchestrator_copy_dir_success",
+                            task_id=task.id,
+                            source=str(source),
+                            dest=str(dest_path)
+                        )
+            else:
+                # Hardlinks disabled, copy directly
                 if source.is_file():
                     shutil.copy2(str(source), str(dest_path))
                     logger.info(
