@@ -72,10 +72,12 @@ async def set_hardcover_token(
 class DownloadPathsResponse(BaseModel):
     ebook_download_path: Optional[str] = None
     audiobook_download_path: Optional[str] = None
+    use_hardlinks: bool = True
 
 class DownloadPathsUpdate(BaseModel):
     ebook_download_path: Optional[str] = None
     audiobook_download_path: Optional[str] = None
+    use_hardlinks: Optional[bool] = None
 
 def get_setting_value(db: Session, key: str) -> Optional[str]:
     """Get a setting value from database or env var"""
@@ -110,9 +112,13 @@ def set_setting_value(db: Session, key: str, value: Optional[str]):
 @router.get("/download-paths", response_model=DownloadPathsResponse)
 async def get_download_paths(db: Session = Depends(get_db)):
     """Get download paths configuration"""
+    use_hardlinks_val = get_setting_value(db, "use_hardlinks")
+    use_hardlinks = use_hardlinks_val != "false"  # Default to True
+
     return DownloadPathsResponse(
         ebook_download_path=get_setting_value(db, "ebook_download_path"),
-        audiobook_download_path=get_setting_value(db, "audiobook_download_path")
+        audiobook_download_path=get_setting_value(db, "audiobook_download_path"),
+        use_hardlinks=use_hardlinks,
     )
 
 @router.put("/download-paths")
@@ -126,6 +132,9 @@ async def update_download_paths(
 
     if update.audiobook_download_path is not None:
         set_setting_value(db, "audiobook_download_path", update.audiobook_download_path)
+
+    if update.use_hardlinks is not None:
+        set_setting_value(db, "use_hardlinks", "true" if update.use_hardlinks else "false")
 
     return {"message": "Download paths updated successfully"}
 
