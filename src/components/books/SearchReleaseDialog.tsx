@@ -13,6 +13,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Download, Search, HardDrive, Wifi, BookOpen, Headphones, CheckCircle, RefreshCw, XCircle, ExternalLink, Globe } from 'lucide-react';
+import { DirectDownloadProgress } from '@/components/books/DirectDownloadProgress';
 import { Progress } from '@/components/ui/progress';
 import { downloadsApi, ReleaseInfo, booksApi, directDownloadApi } from '@/lib/api';
 import { toast } from 'sonner';
@@ -490,16 +491,24 @@ export function SearchReleaseDialog({
                   <span>Starting download...</span>
                 </div>
               ) : isDownloading && task ? (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                      <span>{task.state === 'queued' ? 'Queued' : 'Downloading'}</span>
+                task.protocol === 'direct' && task.message ? (
+                  <DirectDownloadProgress
+                    state={task.state}
+                    message={task.message}
+                    progress={task.progress}
+                  />
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <div className="flex items-center gap-2 text-muted-foreground">
+                        <RefreshCw className="h-4 w-4 animate-spin" />
+                        <span>{task.state === 'queued' ? 'Queued' : 'Downloading'}</span>
+                      </div>
+                      <span className="text-muted-foreground">{task.progress.toFixed(0)}%</span>
                     </div>
-                    <span className="text-muted-foreground">{task.progress.toFixed(0)}%</span>
+                    <Progress value={task.progress} className="h-2" />
                   </div>
-                  <Progress value={task.progress} className="h-2" />
-                </div>
+                )
               ) : isComplete ? (
                 <div className="flex items-center gap-2 text-sm text-green-400">
                   <CheckCircle className="h-4 w-4" />
@@ -509,7 +518,7 @@ export function SearchReleaseDialog({
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 text-sm text-red-400">
                     <XCircle className="h-4 w-4" />
-                    <span>Download Failed</span>
+                    <span>{task?.protocol === 'direct' && task?.message ? task.message : 'Download Failed'}</span>
                   </div>
                   <Button
                     size="sm"

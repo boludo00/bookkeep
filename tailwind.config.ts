@@ -120,6 +120,10 @@ export default {
   			'glow': {
   				'0%, 100%': { boxShadow: '0 0 20px hsl(var(--primary) / 0.3)' },
   				'50%': { boxShadow: '0 0 40px hsl(var(--primary) / 0.5)' }
+  			},
+  			'indeterminate': {
+  				'0%': { transform: 'translateX(-100%)' },
+  				'100%': { transform: 'translateX(300%)' }
   			}
   		},
   		animation: {
@@ -132,7 +136,8 @@ export default {
   			'slide-in-right': 'slide-in-right 0.3s ease-out',
   			'slide-in-left': 'slide-in-left 0.3s ease-out',
   			'pulse-subtle': 'pulse-subtle 2s ease-in-out infinite',
-  			'glow': 'glow 2s ease-in-out infinite'
+  			'glow': 'glow 2s ease-in-out infinite',
+  			'indeterminate': 'indeterminate 1.5s ease-in-out infinite'
   		},
   		fontFamily: {
   			sans: [

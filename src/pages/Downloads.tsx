@@ -539,13 +539,13 @@ export default function Downloads() {
                             {getDetailedStatus(task.state, task.client_state)}
                           </Badge>
                         )}
-                        {task.state === 'downloading' && task.protocol === 'direct' && task.message && (
-                          <span className="text-xs text-primary font-medium truncate max-w-[120px]" title={task.message}>
+                        {(task.state === 'downloading' || task.state === 'queued') && task.protocol === 'direct' && task.message && (
+                          <span className="text-xs text-primary font-medium truncate max-w-[180px]" title={task.message}>
                             {task.message}
                           </span>
                         )}
                         {task.state === 'error' && task.protocol === 'direct' && task.message && (
-                          <span className="text-xs text-destructive font-medium truncate max-w-[120px]" title={task.message}>
+                          <span className="text-xs text-destructive font-medium truncate max-w-[180px]" title={task.message}>
                             {task.message}
                           </span>
                         )}
