@@ -27,6 +27,7 @@ class DirectDownloadSettingsUpdate(BaseModel):
     zlibrary_password: Optional[str] = None  # Only set if changing
     zlibrary_domain: Optional[str] = None
     requests_per_minute: int = 10
+    flaresolverr_url: Optional[str] = None
 
 
 class DirectDownloadSettingsResponse(BaseModel):
@@ -40,6 +41,7 @@ class DirectDownloadSettingsResponse(BaseModel):
     zlibrary_password_set: bool  # True if password is configured (don't expose actual password)
     zlibrary_domain: Optional[str]
     requests_per_minute: int
+    flaresolverr_url: Optional[str]
 
     class Config:
         from_attributes = True
@@ -65,6 +67,7 @@ def _settings_to_response(settings: DirectDownloadSettings) -> DirectDownloadSet
         zlibrary_password_set=bool(settings.zlibrary_password),  # Don't expose password
         zlibrary_domain=settings.zlibrary_domain,
         requests_per_minute=settings.requests_per_minute,
+        flaresolverr_url=settings.flaresolverr_url,
     )
 
 
@@ -89,6 +92,7 @@ async def get_settings(db: Session = Depends(get_db)):
             zlibrary_password_set=False,
             zlibrary_domain=None,
             requests_per_minute=10,
+            flaresolverr_url=None,
         )
 
     return _settings_to_response(settings)
@@ -117,6 +121,7 @@ async def update_settings(
             zlibrary_password=data.zlibrary_password,
             zlibrary_domain=data.zlibrary_domain,
             requests_per_minute=data.requests_per_minute,
+            flaresolverr_url=data.flaresolverr_url,
         )
         db.add(settings)
         logger.info("direct_download_settings_created")
@@ -129,6 +134,7 @@ async def update_settings(
         settings.zlibrary_email = data.zlibrary_email
         settings.zlibrary_domain = data.zlibrary_domain
         settings.requests_per_minute = data.requests_per_minute
+        settings.flaresolverr_url = data.flaresolverr_url
 
         # Only update password if provided (non-empty)
         if data.zlibrary_password:
@@ -218,6 +224,55 @@ async def reset_settings(db: Session = Depends(get_db)):
         logger.info("direct_download_settings_reset")
 
     return {"success": True, "message": "Settings reset to defaults"}
+
+
+class FlareSolverrTestRequest(BaseModel):
+    """Request schema for testing FlareSolverr connection."""
+    url: str
+
+
+class FlareSolverrTestResponse(BaseModel):
+    """Response schema for FlareSolverr connection test."""
+    success: bool
+    message: str
+
+
+@router.post("/test-flaresolverr", response_model=FlareSolverrTestResponse)
+async def test_flaresolverr(data: FlareSolverrTestRequest):
+    """
+    Test connectivity to a FlareSolverr instance.
+
+    Sends a sessions.list command to verify FlareSolverr is reachable.
+    """
+    from ..downloads.flaresolverr import FlareSolverrClient
+
+    if not data.url:
+        return FlareSolverrTestResponse(
+            success=False,
+            message="FlareSolverr URL is required"
+        )
+
+    try:
+        client = FlareSolverrClient(data.url)
+        success = await client.test_connection()
+        await client.close()
+
+        if success:
+            return FlareSolverrTestResponse(
+                success=True,
+                message="FlareSolverr is reachable and responding"
+            )
+        else:
+            return FlareSolverrTestResponse(
+                success=False,
+                message="FlareSolverr returned an unexpected response"
+            )
+    except Exception as e:
+        logger.error("flaresolverr_test_error", error=str(e))
+        return FlareSolverrTestResponse(
+            success=False,
+            message=f"Connection failed: {str(e)}"
+        )
 
 
 @router.post("/debug-search")

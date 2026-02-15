@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Save, TestTube, CheckCircle, XCircle, Eye, EyeOff, Download, Globe, Lock } from 'lucide-react';
+import { Save, TestTube, CheckCircle, XCircle, Eye, EyeOff, Download, Globe, Lock, Shield } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -19,11 +19,17 @@ interface DirectDownloadForm {
   zlibrary_password: string;
   zlibrary_domain: string;
   requests_per_minute: number;
+  flaresolverr_url: string;
 }
 
 export default function DirectDownloadSettings() {
   const [showPassword, setShowPassword] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
+  const [testingFlaresolverr, setTestingFlaresolverr] = useState(false);
+  const [flaresolverrResult, setFlaresolverrResult] = useState<{
+    success: boolean;
+    message: string;
+  } | null>(null);
   const [testResult, setTestResult] = useState<{
     success: boolean;
     providers_count: number;
@@ -40,6 +46,7 @@ export default function DirectDownloadSettings() {
     zlibrary_password: '',
     zlibrary_domain: '',
     requests_per_minute: 10,
+    flaresolverr_url: '',
   });
 
   const queryClient = useQueryClient();
@@ -62,6 +69,7 @@ export default function DirectDownloadSettings() {
         zlibrary_password: '', // Never populate from server
         zlibrary_domain: settings.zlibrary_domain || '',
         requests_per_minute: settings.requests_per_minute,
+        flaresolverr_url: settings.flaresolverr_url || '',
       });
     }
   }, [settings]);
@@ -101,6 +109,32 @@ export default function DirectDownloadSettings() {
 
   const handleSave = () => {
     saveMutation.mutate(form);
+  };
+
+  const handleTestFlaresolverr = async () => {
+    if (!form.flaresolverr_url) {
+      toast.error('Please enter a FlareSolverr URL first');
+      return;
+    }
+
+    setTestingFlaresolverr(true);
+    setFlaresolverrResult(null);
+
+    try {
+      const result = await directDownloadApi.testFlaresolverr(form.flaresolverr_url);
+      setFlaresolverrResult(result);
+
+      if (result.success) {
+        toast.success(result.message || 'FlareSolverr connected!');
+      } else {
+        toast.error(result.message || 'FlareSolverr connection failed');
+      }
+    } catch (error: any) {
+      setFlaresolverrResult({ success: false, message: error.message });
+      toast.error('Test failed', { description: error.message });
+    } finally {
+      setTestingFlaresolverr(false);
+    }
   };
 
   if (isLoading) {
@@ -278,6 +312,59 @@ export default function DirectDownloadSettings() {
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* Cloudflare Bypass (FlareSolverr) */}
+            <div className="space-y-4 p-4 rounded-lg border border-border">
+              <div className="flex items-center gap-3">
+                <Shield className="h-5 w-5 text-amber-500" />
+                <div>
+                  <Label className="text-foreground font-medium">Cloudflare Bypass</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Optional: Use FlareSolverr to bypass Cloudflare protection on source sites
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-2 pt-2 pl-8">
+                <Label htmlFor="flaresolverr-url" className="text-muted-foreground text-sm">
+                  FlareSolverr URL
+                </Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="flaresolverr-url"
+                    value={form.flaresolverr_url}
+                    onChange={(e) => setForm({ ...form, flaresolverr_url: e.target.value })}
+                    placeholder="http://flaresolverr:8191"
+                    className="bg-secondary border-border"
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleTestFlaresolverr}
+                    disabled={testingFlaresolverr || !form.flaresolverr_url}
+                    className="shrink-0"
+                  >
+                    <TestTube className="h-4 w-4 mr-1" />
+                    {testingFlaresolverr ? 'Testing...' : 'Test'}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Leave blank to disable. Run FlareSolverr as a Docker sidecar for Cloudflare bypass.
+                </p>
+                {flaresolverrResult && (
+                  <div className="flex items-center gap-2 text-sm mt-1">
+                    {flaresolverrResult.success ? (
+                      <CheckCircle className="h-4 w-4 text-green-500" />
+                    ) : (
+                      <XCircle className="h-4 w-4 text-red-500" />
+                    )}
+                    <span className={flaresolverrResult.success ? 'text-green-500' : 'text-red-500'}>
+                      {flaresolverrResult.message}
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Rate Limiting */}

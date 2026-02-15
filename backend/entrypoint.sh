@@ -1,14 +1,5 @@
 #!/bin/bash
 
-# Start Xvfb (virtual display) for Cloudflare bypass if available
-if command -v Xvfb &> /dev/null; then
-    echo "Starting Xvfb virtual display..."
-    Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp &
-    export DISPLAY=:99
-    sleep 1
-    echo "✓ Xvfb started on display :99"
-fi
-
 # Set DATABASE_URL explicitly to ensure it points to the correct location
 export DATABASE_URL="${DATABASE_URL:-sqlite:////app/data/bookkeep.db}"
 
@@ -41,7 +32,7 @@ fi
 # Then migrations will add any missing columns (idempotent)
 cd /app
 echo "Creating database tables if they don't exist..."
-python -c "from app.database import engine, Base; Base.metadata.create_all(bind=engine); print('✓ Tables created/verified')"
+python -c "from app.database import engine, Base; Base.metadata.create_all(bind=engine); print('Tables created/verified')"
 
 # Now run migrations to add any missing columns
 cd /app/backend
@@ -51,10 +42,10 @@ echo "Checking Alembic version..."
 python -m alembic -c alembic.ini current || echo "No current version (database may be new)"
 echo "Running migrations..."
 if python -m alembic -c alembic.ini upgrade head 2>&1; then
-    echo "✓ Alembic migrations completed successfully"
+    echo "Alembic migrations completed successfully"
     python -m alembic -c alembic.ini current
 else
-    echo "✗ WARNING: Alembic migrations had issues (this is okay if columns already exist)"
+    echo "WARNING: Alembic migrations had issues (this is okay if columns already exist)"
 fi
 
 # Start the application from /app (where uvicorn expects to find backend module)

@@ -17,25 +17,15 @@ from urllib.parse import urlparse, unquote
 import structlog
 from bs4 import BeautifulSoup
 
-try:
-    from curl_cffi import requests as cf_requests
-    CURL_CFFI_AVAILABLE = True
-except ImportError:
-    CURL_CFFI_AVAILABLE = False
-    cf_requests = None
-
 from .. import DownloadHandler, DownloadStatus, DownloadState, register_handler
-from ...models import DownloadTask as DownloadTaskModel, AppSettings
+from ...models import DownloadTask as DownloadTaskModel, AppSettings, DirectDownloadSettings
 from sqlalchemy.orm import Session
 
-from ..bypass import (
-    get_bypassed_page,
-    get_cf_cookies_for_domain,
-    get_cf_user_agent_for_domain,
-    has_valid_cf_cookies,
-    is_bypass_available,
-    BypassCancelledException,
-    BYPASS_AVAILABLE,
+from ..flaresolverr import (
+    solve_sync,
+    FlareSolverrError,
+    is_cloudflare_challenge,
+    cookie_cache,
 )
 
 logger = structlog.get_logger()
@@ -163,6 +153,27 @@ class DirectHandler(DownloadHandler):
             db_session: Database session for looking up download paths
         """
         self.db_session = db_session
+        self._flaresolverr_url: Optional[str] = None
+        self._flaresolverr_url_loaded = False
+
+    def _get_flaresolverr_url(self) -> Optional[str]:
+        """Get FlareSolverr URL from database settings (cached)."""
+        if self._flaresolverr_url_loaded:
+            return self._flaresolverr_url
+
+        self._flaresolverr_url_loaded = True
+
+        if not self.db_session:
+            return None
+
+        try:
+            settings = self.db_session.query(DirectDownloadSettings).first()
+            if settings and settings.flaresolverr_url:
+                self._flaresolverr_url = settings.flaresolverr_url
+        except Exception as e:
+            logger.debug("flaresolverr_url_lookup_failed", error=str(e))
+
+        return self._flaresolverr_url
 
     def _get_download_path(self, task: DownloadTaskModel) -> Optional[Path]:
         """Get configured download directory for format type."""
@@ -177,14 +188,15 @@ class DirectHandler(DownloadHandler):
 
         if setting and setting.value:
             path = Path(setting.value)
-            if path.exists() and path.is_dir():
-                return path
-            else:
+            try:
+                path.mkdir(parents=True, exist_ok=True)
+                if path.is_dir():
+                    return path
+            except OSError as e:
                 logger.warning(
-                    "direct_download_path_invalid",
+                    "direct_download_path_create_failed",
                     path=setting.value,
-                    exists=path.exists(),
-                    is_dir=path.is_dir() if path.exists() else False
+                    error=str(e),
                 )
 
         # Check environment variable fallback
@@ -192,35 +204,21 @@ class DirectHandler(DownloadHandler):
         env_value = os.getenv(env_key)
         if env_value:
             path = Path(env_value)
-            if path.exists() and path.is_dir():
-                return path
+            try:
+                path.mkdir(parents=True, exist_ok=True)
+                if path.is_dir():
+                    return path
+            except OSError as e:
+                logger.warning(
+                    "direct_download_path_env_create_failed",
+                    path=env_value,
+                    error=str(e),
+                )
 
         return None
 
-    def _create_client(self):
-        """
-        Create HTTP client with browser impersonation if available.
-
-        Returns curl_cffi session if available, falls back to httpx.
-        """
-        if CURL_CFFI_AVAILABLE:
-            try:
-                # Create curl_cffi session with Chrome browser impersonation
-                session = cf_requests.Session(impersonate="chrome")
-                session.timeout = self.DEFAULT_TIMEOUT
-                session.headers.update({
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                    "Accept-Language": "en-US,en;q=0.9",
-                    "Accept-Encoding": "gzip, deflate, br",
-                })
-                logger.info("direct_using_curl_cffi", impersonate="chrome")
-                return session
-            except Exception as e:
-                logger.warning("direct_curl_cffi_init_failed", error=str(e), fallback="httpx")
-        else:
-            logger.info("direct_using_httpx", reason="curl_cffi_unavailable")
-
-        # Fallback to httpx
+    def _create_client(self) -> httpx.Client:
+        """Create HTTP client."""
         return httpx.Client(
             follow_redirects=True,
             timeout=httpx.Timeout(self.DEFAULT_TIMEOUT, connect=self.CONNECT_TIMEOUT),
@@ -234,15 +232,7 @@ class DirectHandler(DownloadHandler):
     def _extract_filename(self, url: str, response, task: DownloadTaskModel) -> str:
         """Extract filename from response or generate from task info."""
         # Try Content-Disposition header first
-        # Handle both httpx and curl_cffi response headers
-        if hasattr(response, "headers"):
-            if hasattr(response.headers, "get"):
-                content_disp = response.headers.get("content-disposition", "")
-            else:
-                # curl_cffi uses dict-like access
-                content_disp = response.headers.get("content-disposition", "")
-        else:
-            content_disp = ""
+        content_disp = response.headers.get("content-disposition", "")
         if "filename=" in content_disp:
             if "filename*=" in content_disp:
                 parts = content_disp.split("filename*=")
@@ -272,10 +262,7 @@ class DirectHandler(DownloadHandler):
                 base_name = f"download_{task.id}"
 
             # Determine extension from content-type
-            if hasattr(response, "headers"):
-                content_type = response.headers.get("content-type", "")
-            else:
-                content_type = ""
+            content_type = response.headers.get("content-type", "")
             ext = self._get_extension_from_content_type(content_type) or f".{task.format}"
             filename = f"{base_name}{ext}"
 
@@ -325,7 +312,7 @@ class DirectHandler(DownloadHandler):
             if counter > 1000:
                 raise ValueError("Could not find unique filename")
 
-    def _parse_annas_archive_sources(self, url: str, client) -> List[DownloadSource]:
+    def _parse_annas_archive_sources(self, url: str, client: httpx.Client) -> List[DownloadSource]:
         """
         Parse Anna's Archive MD5 page and extract all download sources.
 
@@ -337,58 +324,45 @@ class DirectHandler(DownloadHandler):
             logger.info("annas_parsing_md5_page", url=url)
 
             html = None
+            hostname = urlparse(url).hostname
 
-            # Make request with browser impersonation if using curl_cffi
-            if CURL_CFFI_AVAILABLE and isinstance(client, cf_requests.Session):
-                try:
-                    response = client.get(
-                        url,
-                        headers={
-                            "Referer": "https://annas-archive.org/",
-                        }
-                    )
-                    html = response.text
-                except Exception as e:
-                    # Check if it's a 403 error
-                    if "403" in str(e) or (hasattr(e, "status_code") and e.status_code == 403):
-                        # Try bypass if available
-                        if BYPASS_AVAILABLE and is_bypass_available():
-                            logger.info("annas_md5_403_attempting_bypass", url=url)
-                            try:
-                                html = get_bypassed_page(url)
-                                if not html:
-                                    logger.warning("annas_md5_bypass_failed", url=url)
-                            except BypassCancelledException:
-                                raise
-                            except Exception as bypass_err:
-                                logger.warning("annas_md5_bypass_error", url=url, error=str(bypass_err))
-                        if not html:
-                            raise
-                    else:
+            # Try with cached cookies and user-agent first
+            cached_cookies = cookie_cache.get(hostname) if hostname else {}
+            cached_ua = cookie_cache.get_user_agent(hostname) if hostname else ""
+
+            md5_headers = {"Referer": "https://annas-archive.org/"}
+            if cached_ua:
+                md5_headers["User-Agent"] = cached_ua
+
+            try:
+                response = client.get(
+                    url,
+                    headers=md5_headers,
+                    cookies=cached_cookies or None,
+                )
+                response.raise_for_status()
+                html = response.text
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 403:
+                    # Try FlareSolverr
+                    fs_url = self._get_flaresolverr_url()
+                    if fs_url:
+                        logger.info("annas_md5_403_trying_flaresolverr", url=url)
+                        try:
+                            result = solve_sync(fs_url, url)
+                            html = result.html
+                            if hostname and result.cookies:
+                                cookie_cache.store(
+                                    hostname,
+                                    result.cookies,
+                                    user_agent=result.user_agent,
+                                )
+                        except FlareSolverrError as fs_err:
+                            logger.warning("annas_md5_flaresolverr_failed", error=str(fs_err))
+                    if not html:
                         raise
-            else:
-                try:
-                    response = client.get(url)
-                    response.raise_for_status()
-                    html = response.text
-                except Exception as e:
-                    # Check if it's a 403 error
-                    if hasattr(e, "response") and e.response.status_code == 403:
-                        # Try bypass if available
-                        if BYPASS_AVAILABLE and is_bypass_available():
-                            logger.info("annas_md5_403_attempting_bypass", url=url)
-                            try:
-                                html = get_bypassed_page(url)
-                                if not html:
-                                    logger.warning("annas_md5_bypass_failed", url=url)
-                            except BypassCancelledException:
-                                raise
-                            except Exception as bypass_err:
-                                logger.warning("annas_md5_bypass_error", url=url, error=str(bypass_err))
-                        if not html:
-                            raise
-                    else:
-                        raise
+                else:
+                    raise
 
             if not html:
                 logger.error("annas_md5_no_html", url=url)
@@ -491,21 +465,150 @@ class DirectHandler(DownloadHandler):
             return f"{base_url}{url}"
         return f"{base_url}/{url}"
 
-    def _resolve_libgen_url(self, url: str, client) -> Optional[str]:
+    def _resolve_slow_download(self, url: str, client: httpx.Client, status_callback=None) -> Optional[str]:
         """
-        Resolve Libgen.li ads.php page to get actual download link.
+        Resolve Anna's Archive slow_download page to get the actual CDN download URL.
+
+        The slow_download flow works as follows:
+        1. First visit starts a 30-second server-side countdown timer
+        2. After the countdown, revisiting the same URL reveals the CDN download link
+        3. The CDN link is in an anchor with text containing "Download now"
+
+        Uses FlareSolverr to solve DDoS-Guard challenges on both visits.
+
+        Returns:
+            The actual CDN download URL, or None if resolution failed.
         """
+        fs_url = self._get_flaresolverr_url()
+        if not fs_url:
+            logger.warning("slow_download_no_flaresolverr", url=url[:80])
+            return None
+
+        try:
+            # Step 1: First visit to start the server-side timer
+            logger.info("slow_download_starting_timer", url=url[:80])
+
+            if status_callback:
+                status_callback(DownloadStatus(
+                    state=DownloadState.QUEUED,
+                    progress=0.0,
+                    message="Starting countdown..."
+                ))
+
+            result1 = solve_sync(fs_url, url)
+
+            # Check if we already got the download page (timer already expired)
+            cdn_url = self._extract_cdn_download_url(result1.html)
+            if cdn_url:
+                logger.info("slow_download_immediate_cdn", url=cdn_url[:80])
+                return cdn_url
+
+            # Cache cookies from the first solve
+            hostname = urlparse(url).hostname
+            if hostname and result1.cookies:
+                cookie_cache.store(hostname, result1.cookies, user_agent=result1.user_agent)
+
+            # Step 2: Wait for the server-side countdown (30s + buffer)
+            wait_seconds = 33
+            logger.info("slow_download_waiting", seconds=wait_seconds)
+
+            for elapsed in range(wait_seconds):
+                if status_callback:
+                    remaining = wait_seconds - elapsed
+                    status_callback(DownloadStatus(
+                        state=DownloadState.QUEUED,
+                        progress=0.0,
+                        message=f"Waiting ({remaining}s)..."
+                    ))
+                time.sleep(1)
+
+            # Step 3: Re-visit the same URL - server should now show the CDN link
+            logger.info("slow_download_refetching", url=url[:80])
+
+            if status_callback:
+                status_callback(DownloadStatus(
+                    state=DownloadState.QUEUED,
+                    progress=0.0,
+                    message="Fetching download link..."
+                ))
+
+            result2 = solve_sync(fs_url, url)
+
+            # Cache updated cookies
+            if hostname and result2.cookies:
+                cookie_cache.store(hostname, result2.cookies, user_agent=result2.user_agent)
+
+            # Step 4: Extract the CDN download URL from the response
+            cdn_url = self._extract_cdn_download_url(result2.html)
+            if cdn_url:
+                logger.info("slow_download_resolved", cdn_url=cdn_url[:80])
+                return cdn_url
+
+            logger.warning("slow_download_no_cdn_link", url=url[:80], html_len=len(result2.html))
+            return None
+
+        except FlareSolverrError as e:
+            logger.error("slow_download_flaresolverr_error", url=url[:80], error=str(e))
+            return None
+        except Exception as e:
+            logger.error("slow_download_error", url=url[:80], error=str(e))
+            return None
+
+    def _extract_cdn_download_url(self, html: str) -> Optional[str]:
+        """
+        Extract CDN download URL from a resolved slow_download page.
+
+        After the countdown, the page contains links like:
+        - "Download now" pointing to the CDN (e.g., https://b4mcx2ml.net/d3/y/...)
+        - "Download with short filename" with an alternative CDN URL
+        """
+        if not html:
+            return None
+
+        try:
+            soup = BeautifulSoup(html, "lxml")
+
+            # Look for the "Download now" link (primary download)
+            for anchor in soup.find_all("a"):
+                text = anchor.get_text(strip=True).lower()
+                href = anchor.get("href", "")
+
+                if not href or not href.startswith("http"):
+                    continue
+
+                # Match "Download now" or "Download with short filename"
+                if "download now" in text or "download with short filename" in text:
+                    # Verify it's not a navigation link (should be an external CDN URL)
+                    parsed = urlparse(href)
+                    if parsed.hostname and "annas-archive" not in parsed.hostname:
+                        return href
+
+            # Fallback: look for links that look like CDN download URLs
+            # Pattern: external domain with file extension in path
+            for anchor in soup.find_all("a"):
+                href = anchor.get("href", "")
+                if not href or not href.startswith("http"):
+                    continue
+
+                parsed = urlparse(href)
+                if parsed.hostname and "annas-archive" not in parsed.hostname:
+                    path_lower = parsed.path.lower()
+                    if any(path_lower.endswith(ext) for ext in [".epub", ".pdf", ".mobi", ".azw3", ".mp3", ".m4b"]):
+                        return href
+
+        except Exception as e:
+            logger.debug("cdn_url_extract_error", error=str(e))
+
+        return None
+
+    def _resolve_libgen_url(self, url: str, client: httpx.Client) -> Optional[str]:
+        """Resolve Libgen.li ads.php page to get actual download link."""
         try:
             logger.debug("libgen_resolving", url=url)
 
-            # Make request with browser impersonation if using curl_cffi
-            if CURL_CFFI_AVAILABLE and isinstance(client, cf_requests.Session):
-                response = client.get(url)
-                html = response.text
-            else:
-                response = client.get(url)
-                response.raise_for_status()
-                html = response.text
+            response = client.get(url)
+            response.raise_for_status()
+            html = response.text
 
             soup = BeautifulSoup(html, "lxml")
             get_link = soup.select_one('a[href*="get.php"]')
@@ -529,7 +632,7 @@ class DirectHandler(DownloadHandler):
     def _try_download_from_source(
         self,
         source: DownloadSource,
-        client,
+        client: httpx.Client,
         dest_dir: Path,
         task: DownloadTaskModel,
         cancel_flag: Event,
@@ -546,7 +649,15 @@ class DirectHandler(DownloadHandler):
 
         try:
             # Resolve intermediary pages
-            if source.source_type == "libgen":
+            if source.source_type in ("aa-slow-nowait", "aa-slow-wait"):
+                resolved = self._resolve_slow_download(url, client, status_callback)
+                if not resolved:
+                    attempt.error = "Could not resolve slow download CDN link"
+                    return None
+                url = resolved
+                logger.info("direct_slow_download_resolved", source=source.name, cdn_url=url[:80])
+
+            elif source.source_type == "libgen":
                 if "ads.php" in url:
                     resolved = self._resolve_libgen_url(url, client)
                     if not resolved:
@@ -571,109 +682,113 @@ class DirectHandler(DownloadHandler):
 
             logger.info("direct_trying_source", source=source.name, type=source.source_type, url=url[:80])
 
-            # Determine if we're using curl_cffi or httpx
-            is_curl_cffi = CURL_CFFI_AVAILABLE and isinstance(client, cf_requests.Session)
+            # Try with cached cookies and user-agent from previous FlareSolverr solve
+            hostname = urlparse(url).hostname
+            cached_cookies = cookie_cache.get(hostname) if hostname else {}
+            cached_ua = cookie_cache.get_user_agent(hostname) if hostname else ""
 
-            # Start the download with browser impersonation
-            if is_curl_cffi:
-                # curl_cffi streaming approach
-                response = client.get(
-                    url,
-                    stream=True,
-                    headers={
-                        "Referer": "https://annas-archive.org/",
-                    },
-                    timeout=self.DEFAULT_TIMEOUT,
+            request_headers = {"Referer": "https://annas-archive.org/"}
+            if cached_ua:
+                request_headers["User-Agent"] = cached_ua
+
+            if cached_cookies:
+                logger.info(
+                    "direct_using_cached_session",
+                    source=source.name,
+                    cookie_count=len(cached_cookies),
+                    using_solved_ua=bool(cached_ua),
                 )
-                # Note: curl_cffi does NOT auto-raise, we check status below
-            else:
-                # httpx streaming approach
-                response = client.stream("GET", url)
-                response.__enter__()
+
+            # Start the download with streaming
+            stream_cm = client.stream(
+                "GET",
+                url,
+                headers=request_headers,
+                cookies=cached_cookies or None,
+            )
+            response = stream_cm.__enter__()
 
             try:
-                # Check for HTTP errors - both clients need explicit checking
                 status_code = response.status_code
+
                 if status_code == 403:
-                    # Try bypass if available
-                    if BYPASS_AVAILABLE and is_bypass_available():
-                        logger.info("direct_403_attempting_bypass", source=source.name, url=url[:80])
+                    # Try FlareSolverr
+                    fs_url = self._get_flaresolverr_url()
+                    if fs_url:
+                        logger.info("direct_403_trying_flaresolverr", source=source.name, url=url[:80])
 
                         if status_callback:
                             status_callback(DownloadStatus(
                                 state=DownloadState.QUEUED,
                                 progress=0.0,
-                                message="Bypassing..."
+                                message="Solving challenge..."
                             ))
 
                         try:
-                            bypassed_html = get_bypassed_page(url, cancel_flag=cancel_flag)
-                            if bypassed_html:
-                                # Get cached cookies and user-agent
-                                hostname = urlparse(url).hostname
-                                cookies = get_cf_cookies_for_domain(hostname)
-                                ua = get_cf_user_agent_for_domain(hostname)
+                            result = solve_sync(fs_url, url)
 
-                                if cookies:
-                                    logger.info("direct_bypass_success", source=source.name, cookies=len(cookies))
+                            if hostname and result.cookies:
+                                cookie_cache.store(
+                                    hostname,
+                                    result.cookies,
+                                    user_agent=result.user_agent,
+                                )
 
-                                    # Update client with bypass cookies
-                                    if is_curl_cffi:
-                                        # For curl_cffi, update session cookies
-                                        for cookie_name, cookie_value in cookies.items():
-                                            client.cookies.set(cookie_name, cookie_value, domain=hostname)
-                                        if ua:
-                                            client.headers['User-Agent'] = ua
-                                    else:
-                                        # For httpx, create new cookies dict
-                                        if hasattr(client, 'cookies'):
-                                            client.cookies.update(cookies)
-                                        if ua and hasattr(client, 'headers'):
-                                            client.headers['User-Agent'] = ua
+                            logger.info(
+                                "direct_flaresolverr_solved",
+                                source=source.name,
+                                cookie_count=len(result.cookies),
+                                has_user_agent=bool(result.user_agent),
+                                solved_url=result.url[:80] if result.url else "",
+                                original_url=url[:80],
+                            )
 
-                                    # Close the 403 response and retry the request
-                                    if not is_curl_cffi and hasattr(response, "__exit__"):
-                                        response.__exit__(None, None, None)
+                            # Close the 403 response and retry with cookies + matching UA
+                            stream_cm.__exit__(None, None, None)
 
-                                    logger.debug("retrying_with_bypass_cookies", source=source.name)
+                            solved_cookies = cookie_cache.get(hostname) if hostname else {}
+                            solved_ua = cookie_cache.get_user_agent(hostname) if hostname else ""
 
-                                    # Retry the download with new cookies
-                                    if is_curl_cffi:
-                                        response = client.get(
-                                            url,
-                                            stream=True,
-                                            headers={
-                                                "Referer": "https://annas-archive.org/",
-                                            },
-                                            timeout=self.DEFAULT_TIMEOUT,
-                                        )
-                                    else:
-                                        response = client.stream("GET", url)
-                                        response.__enter__()
+                            retry_headers = {"Referer": "https://annas-archive.org/"}
+                            if solved_ua:
+                                retry_headers["User-Agent"] = solved_ua
 
-                                    # Check new status
-                                    status_code = response.status_code
-                                    if status_code >= 400:
-                                        attempt.error = f"Still blocked after bypass (HTTP {status_code})"
-                                        logger.warning("direct_bypass_retry_failed", source=source.name, status=status_code)
-                                        return None
+                            # If FlareSolverr was redirected to a different URL, try that
+                            retry_url = url
+                            if result.url and result.url != url:
+                                logger.info(
+                                    "direct_flaresolverr_redirect",
+                                    source=source.name,
+                                    original=url[:80],
+                                    redirected=result.url[:80],
+                                )
+                                retry_url = result.url
 
-                                    # Continue with normal download flow (don't return, let it fall through)
-                                    logger.info("direct_bypass_retry_success", source=source.name)
-                                else:
-                                    attempt.error = "Bypass succeeded but no cookies extracted"
-                                    logger.warning("direct_bypass_no_cookies", source=source.name)
-                                    return None
-                            else:
-                                attempt.error = "Bypass failed to retrieve page"
-                                logger.warning("direct_bypass_failed", source=source.name)
+                            stream_cm = client.stream(
+                                "GET",
+                                retry_url,
+                                headers=retry_headers,
+                                cookies=solved_cookies or None,
+                            )
+                            response = stream_cm.__enter__()
+
+                            status_code = response.status_code
+                            if status_code >= 400:
+                                attempt.error = f"Still blocked after FlareSolverr (HTTP {status_code})"
+                                logger.warning(
+                                    "direct_flaresolverr_retry_failed",
+                                    source=source.name,
+                                    status=status_code,
+                                    cookie_count=len(solved_cookies),
+                                    used_solved_ua=bool(solved_ua),
+                                    retry_url=retry_url[:80],
+                                )
                                 return None
-                        except BypassCancelledException:
-                            attempt.error = "Bypass cancelled"
-                            return None
-                        except Exception as e:
-                            attempt.error = f"Bypass error: {str(e)[:50]}"
-                            logger.warning("direct_bypass_exception", source=source.name, error=str(e))
+
+                            logger.info("direct_flaresolverr_retry_success", source=source.name)
+                        except FlareSolverrError as e:
+                            attempt.error = f"FlareSolverr error: {str(e)[:50]}"
+                            logger.warning("direct_flaresolverr_failed", source=source.name, error=str(e))
                             return None
                     else:
                         attempt.error = "Access denied (403)"
@@ -691,31 +806,21 @@ class DirectHandler(DownloadHandler):
                     return None
 
                 # Check if we got HTML instead of a file
-                content_type = response.headers.get("content-type", "") if hasattr(response.headers, "get") else ""
+                content_type = response.headers.get("content-type", "")
                 first_chunk = None  # Store first chunk to not lose data
 
                 if "text/html" in content_type:
-                    # Read a bit to check
-                    if is_curl_cffi:
-                        for chunk in response.iter_content(chunk_size=1024):
-                            first_chunk = chunk
-                            break
-                    else:
-                        for chunk in response.iter_bytes(1024):
-                            first_chunk = chunk
-                            break
+                    for chunk in response.iter_bytes(1024):
+                        first_chunk = chunk
+                        break
 
                     if first_chunk and (b"<html" in first_chunk.lower() or b"<!doctype" in first_chunk.lower()):
                         attempt.error = "Received HTML instead of file"
                         logger.warning("direct_source_html", source=source.name, url=url[:80])
                         return None
 
-                # Get file info - handle both response types
-                if is_curl_cffi:
-                    total_size = int(response.headers.get("content-length", 0))
-                else:
-                    total_size = int(response.headers.get("content-length", 0))
-
+                # Get file info
+                total_size = int(response.headers.get("content-length", 0))
                 filename = self._extract_filename(url, response, task)
                 dest_path = self._get_unique_path(dest_dir / filename)
 
@@ -745,13 +850,7 @@ class DirectHandler(DownloadHandler):
                         downloaded += len(first_chunk)
                         attempt.bytes_downloaded = downloaded
 
-                    # Use appropriate iterator based on client type
-                    if is_curl_cffi:
-                        chunk_iterator = response.iter_content(chunk_size=self.CHUNK_SIZE)
-                    else:
-                        chunk_iterator = response.iter_bytes(self.CHUNK_SIZE)
-
-                    for chunk in chunk_iterator:
+                    for chunk in response.iter_bytes(self.CHUNK_SIZE):
                         if cancel_flag.is_set():
                             f.close()
                             if dest_path.exists():
@@ -800,66 +899,40 @@ class DirectHandler(DownloadHandler):
                 return str(dest_path)
 
             finally:
-                # Close response if using httpx
-                if not is_curl_cffi and hasattr(response, "__exit__"):
-                    response.__exit__(None, None, None)
+                if hasattr(stream_cm, "__exit__"):
+                    stream_cm.__exit__(None, None, None)
 
         except Exception as e:
-            # Handle both httpx and curl_cffi errors
             error_type = type(e).__name__
 
-            # Check for specific HTTP errors
-            if "403" in str(e) or (hasattr(e, "response") and hasattr(e.response, "status_code") and e.response.status_code == 403):
-                # Try bypass if available and we haven't already tried
-                if BYPASS_AVAILABLE and is_bypass_available():
-                    logger.info("direct_403_exception_attempting_bypass", source=source.name, url=url[:80])
-
-                    if status_callback:
-                        status_callback(DownloadStatus(
-                            state=DownloadState.QUEUED,
-                            progress=0.0,
-                            message="Bypassing..."
-                        ))
-
+            if hasattr(e, "response") and hasattr(e.response, "status_code") and e.response.status_code == 403:
+                # Try FlareSolverr on 403 exception
+                fs_url = self._get_flaresolverr_url()
+                if fs_url:
+                    logger.info("direct_403_exception_trying_flaresolverr", source=source.name, url=url[:80])
                     try:
-                        bypassed_html = get_bypassed_page(url, cancel_flag=cancel_flag)
-                        if bypassed_html:
-                            # Get cached cookies and user-agent
-                            hostname = urlparse(url).hostname
-                            cookies = get_cf_cookies_for_domain(hostname)
-                            ua = get_cf_user_agent_for_domain(hostname)
+                        result = solve_sync(fs_url, url)
+                        hostname = urlparse(url).hostname
+                        if hostname and result.cookies:
+                            cookie_cache.store(
+                                hostname,
+                                result.cookies,
+                                user_agent=result.user_agent,
+                            )
 
-                            if cookies:
-                                logger.info("direct_bypass_success_retry", source=source.name, cookies=len(cookies))
-                                # Update client
-                                if is_curl_cffi:
-                                    for cookie_name, cookie_value in cookies.items():
-                                        client.cookies.set(cookie_name, cookie_value, domain=hostname)
-                                    if ua:
-                                        client.headers['User-Agent'] = ua
-                                else:
-                                    if hasattr(client, 'cookies'):
-                                        client.cookies.update(cookies)
-                                    if ua and hasattr(client, 'headers'):
-                                        client.headers['User-Agent'] = ua
-
-                                # Recursively retry the download with updated client
-                                logger.debug("recursively_retrying_with_bypass", source=source.name)
-                                return self._try_download_from_source(
-                                    source=source,
-                                    client=client,
-                                    dest_dir=dest_dir,
-                                    task=task,
-                                    cancel_flag=cancel_flag,
-                                    progress_callback=progress_callback,
-                                    status_callback=status_callback,
-                                    attempt=attempt,
-                                )
-                    except BypassCancelledException:
-                        attempt.error = "Bypass cancelled"
-                        return None
-                    except Exception as bypass_err:
-                        logger.warning("direct_bypass_exception_retry_failed", source=source.name, error=str(bypass_err))
+                        # Retry with solved cookies + matching UA
+                        return self._try_download_from_source(
+                            source=source,
+                            client=client,
+                            dest_dir=dest_dir,
+                            task=task,
+                            cancel_flag=cancel_flag,
+                            progress_callback=progress_callback,
+                            status_callback=status_callback,
+                            attempt=attempt,
+                        )
+                    except FlareSolverrError as fs_err:
+                        logger.warning("direct_flaresolverr_exception_failed", source=source.name, error=str(fs_err))
 
                 attempt.error = "Access denied (403)"
                 logger.warning("direct_source_403", source=source.name, url=url[:80])
@@ -870,25 +943,21 @@ class DirectHandler(DownloadHandler):
                 logger.warning("direct_source_429", source=source.name, url=url[:80])
                 return None
 
-            # Handle timeout errors
             if "timeout" in error_type.lower() or "timeout" in str(e).lower():
                 attempt.error = "Timeout"
                 logger.warning("direct_source_timeout", source=source.name)
                 return None
 
-            # Handle connection errors
             if "connect" in error_type.lower() or "connection" in str(e).lower():
                 attempt.error = f"Connection error: {str(e)[:50]}"
                 logger.warning("direct_source_connect_error", source=source.name, error=str(e))
                 return None
 
-            # Generic HTTP status error from exception
             if hasattr(e, "response") and hasattr(e.response, "status_code"):
                 attempt.error = f"HTTP {e.response.status_code}"
                 logger.warning("direct_source_http_error", source=source.name, status=e.response.status_code)
                 return None
 
-            # Generic fallback for unknown errors
             attempt.error = str(e)[:100]
             logger.error("direct_source_error", source=source.name, error=str(e))
             return None
@@ -1080,9 +1149,6 @@ class DirectHandler(DownloadHandler):
                     logger.info("direct_cleanup_removed", task_id=task.id, path=str(path))
             except Exception as e:
                 logger.warning("direct_cleanup_error", task_id=task.id, error=str(e))
-
-        # Keep log for a bit for debugging
-        # clear_download_log(task.id)
 
     def pause(self, task: DownloadTaskModel) -> bool:
         """Direct downloads cannot be paused."""

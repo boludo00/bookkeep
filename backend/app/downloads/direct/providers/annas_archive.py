@@ -10,14 +10,13 @@ from urllib.parse import quote_plus
 import structlog
 from bs4 import BeautifulSoup
 
-try:
-    from curl_cffi import requests as cf_requests
-    CURL_CFFI_AVAILABLE = True
-except ImportError:
-    CURL_CFFI_AVAILABLE = False
-    cf_requests = None
-
 from .base import DirectProvider, DirectSearchResult
+from ...flaresolverr import (
+    FlareSolverrClient,
+    FlareSolverrError,
+    is_cloudflare_challenge,
+    cookie_cache,
+)
 
 logger = structlog.get_logger()
 
@@ -43,16 +42,23 @@ class AnnasArchiveProvider(DirectProvider):
     EBOOK_EXTENSIONS = ["epub", "pdf", "mobi", "azw3", "fb2", "djvu"]
     AUDIOBOOK_EXTENSIONS = ["mp3", "m4b", "m4a", "flac", "ogg"]
 
-    def __init__(self, mirror: Optional[str] = None, timeout: float = 30.0):
+    def __init__(
+        self,
+        mirror: Optional[str] = None,
+        timeout: float = 30.0,
+        flaresolverr_url: Optional[str] = None,
+    ):
         """
         Initialize Anna's Archive provider.
 
         Args:
             mirror: Optional custom mirror URL
             timeout: Request timeout in seconds
+            flaresolverr_url: Optional FlareSolverr URL for Cloudflare bypass
         """
         self.base_url = (mirror or self.DEFAULT_MIRROR).rstrip("/")
         self.timeout = timeout
+        self.flaresolverr_url = flaresolverr_url
         self._client: Optional[httpx.AsyncClient] = None
         self._working_mirror: Optional[str] = None
 
@@ -60,32 +66,9 @@ class AnnasArchiveProvider(DirectProvider):
     def name(self) -> str:
         return "annas_archive"
 
-    async def _get_client(self):
-        """
-        Get or create HTTP client with browser impersonation.
-
-        Returns curl_cffi session if available, falls back to httpx AsyncClient.
-        """
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Get or create HTTP client."""
         if self._client is None:
-            if CURL_CFFI_AVAILABLE:
-                try:
-                    # Create curl_cffi session with Chrome browser impersonation
-                    # Note: curl_cffi doesn't have async support, so we use sync
-                    self._client = cf_requests.Session(impersonate="chrome")
-                    self._client.timeout = self.timeout
-                    self._client.headers.update({
-                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                        "Accept-Language": "en-US,en;q=0.9",
-                        "Accept-Encoding": "gzip, deflate, br",
-                        "Referer": "https://annas-archive.org/",
-                    })
-                    logger.info("annas_using_curl_cffi", impersonate="chrome")
-                    return self._client
-                except Exception as e:
-                    logger.warning("annas_curl_cffi_init_failed", error=str(e), fallback="httpx")
-
-            # Fallback to httpx AsyncClient
-            logger.info("annas_using_httpx", reason="curl_cffi_unavailable" if not CURL_CFFI_AVAILABLE else "curl_cffi_failed")
             self._client = httpx.AsyncClient(
                 timeout=self.timeout,
                 headers={
@@ -104,17 +87,10 @@ class AnnasArchiveProvider(DirectProvider):
 
         mirrors = [self.base_url] + self.FALLBACK_MIRRORS
         client = await self._get_client()
-        is_curl_cffi = CURL_CFFI_AVAILABLE and isinstance(client, cf_requests.Session)
 
         for mirror in mirrors:
             try:
-                if is_curl_cffi:
-                    # Synchronous call for curl_cffi
-                    response = client.get(f"{mirror}/", timeout=10.0)
-                else:
-                    # Async call for httpx
-                    response = await client.get(f"{mirror}/", timeout=10.0)
-
+                response = await client.get(f"{mirror}/", timeout=10.0)
                 if response.status_code == 200:
                     self._working_mirror = mirror
                     logger.info("annas_mirror_found", mirror=mirror)
@@ -167,13 +143,9 @@ class AnnasArchiveProvider(DirectProvider):
         else:
             extensions = self.EBOOK_EXTENSIONS
 
-        # Check if we're using curl_cffi
-        is_curl_cffi = CURL_CFFI_AVAILABLE and isinstance(client, cf_requests.Session)
-
         try:
-            # Build search URL using table display format like shelfmark
-            # Format: /search?index=&page=1&display=table&acc=aa_download&acc=external_download&ext=epub&ext=pdf&q=query
-            ext_params = "&".join([f"ext={ext}" for ext in extensions[:4]])  # Limit to first 4 extensions
+            # Build search URL using table display format
+            ext_params = "&".join([f"ext={ext}" for ext in extensions[:4]])
             search_url = (
                 f"{mirror}/search?"
                 f"index=&page=1&display=table"
@@ -187,16 +159,15 @@ class AnnasArchiveProvider(DirectProvider):
                 url=search_url,
                 query=query,
                 format_type=format_type,
-                client_type="curl_cffi" if is_curl_cffi else "httpx"
             )
 
-            # Make request with appropriate client
-            if is_curl_cffi:
-                response = client.get(search_url)
-                html_text = response.text
-            else:
-                response = await client.get(search_url)
-                html_text = response.text
+            # Try with cached cookies first if available
+            from urllib.parse import urlparse
+            hostname = urlparse(mirror).hostname
+            cached_cookies = cookie_cache.get(hostname) if hostname else {}
+
+            response = await client.get(search_url, cookies=cached_cookies or None)
+            html_text = response.text
 
             logger.info(
                 "annas_search_response",
@@ -207,33 +178,44 @@ class AnnasArchiveProvider(DirectProvider):
                 url=search_url,
             )
 
-            # Check for Cloudflare challenge or JavaScript requirement
-            html_lower = html_text.lower()
-            cf_indicators = [
-                "cf-browser-verification",
-                "cloudflare",
-                "checking your browser",
-                "please wait",
-                "ray id",
-                "enable javascript",
-                "javascript is required",
-            ]
-            if response.status_code == 403 or any(ind in html_lower for ind in cf_indicators):
+            # Check for Cloudflare challenge
+            cf_solved = False
+            if is_cloudflare_challenge(html_text, response.status_code):
                 logger.warning(
                     "annas_cloudflare_blocked",
                     mirror=mirror,
                     status=response.status_code,
-                    snippet=html_text[:500]
                 )
-                self._working_mirror = None
-                return []
 
-            # curl_cffi auto-raises for bad status codes, httpx needs explicit raise
-            if not is_curl_cffi:
+                # Try FlareSolverr if configured
+                if self.flaresolverr_url:
+                    logger.info("annas_trying_flaresolverr", url=search_url)
+                    try:
+                        fs_client = FlareSolverrClient(self.flaresolverr_url)
+                        fs_result = await fs_client.solve(search_url)
+                        await fs_client.close()
+
+                        html_text = fs_result.html
+                        cf_solved = True
+
+                        # Cache the cookies for future requests
+                        if hostname and fs_result.cookies:
+                            cookie_cache.store(hostname, fs_result.cookies)
+
+                        logger.info("annas_flaresolverr_success", url=search_url)
+                    except FlareSolverrError as e:
+                        logger.warning("annas_flaresolverr_failed", error=str(e))
+                        self._working_mirror = None
+                        return []
+                else:
+                    self._working_mirror = None
+                    return []
+
+            if not cf_solved:
                 response.raise_for_status()
 
             # Parse results from HTML using BeautifulSoup
-            results = self._parse_search_results(response.text, format_type, mirror)
+            results = self._parse_search_results(html_text, format_type, mirror)
 
             logger.info(
                 "annas_search_complete",
@@ -325,7 +307,7 @@ class AnnasArchiveProvider(DirectProvider):
         - cells[5]: File path
         - cells[6]: Source badges
         - cells[7]: Language (e.g., "en")
-        - cells[8]: Content type (e.g., "📕 Book (fiction)")
+        - cells[8]: Content type (e.g., "Book (fiction)")
         - cells[9]: Format (e.g., "epub", "pdf")
         - cells[10]: Size (e.g., "0.6MB")
         - cells[11]: Empty
@@ -431,10 +413,8 @@ class AnnasArchiveProvider(DirectProvider):
             "english": "en",
             "en": "en",
             "spanish": "es",
-            "español": "es",
             "es": "es",
             "french": "fr",
-            "français": "fr",
             "fr": "fr",
             "german": "de",
             "deutsch": "de",
@@ -501,13 +481,7 @@ class AnnasArchiveProvider(DirectProvider):
         try:
             mirror = await self._find_working_mirror()
             if mirror:
-                client = await self._get_client()
-                is_curl_cffi = CURL_CFFI_AVAILABLE and isinstance(client, cf_requests.Session)
-                logger.info(
-                    "annas_test_success",
-                    mirror=mirror,
-                    client_type="curl_cffi" if is_curl_cffi else "httpx"
-                )
+                logger.info("annas_test_success", mirror=mirror)
                 return True
             logger.warning("annas_test_failed", error="No working mirror found")
             return False
@@ -518,10 +492,5 @@ class AnnasArchiveProvider(DirectProvider):
     async def close(self):
         """Close HTTP client."""
         if self._client:
-            if CURL_CFFI_AVAILABLE and isinstance(self._client, cf_requests.Session):
-                # curl_cffi session doesn't need async close
-                self._client.close()
-            else:
-                # httpx AsyncClient needs async close
-                await self._client.aclose()
+            await self._client.aclose()
             self._client = None

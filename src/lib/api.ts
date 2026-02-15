@@ -995,6 +995,7 @@ export interface DirectDownloadSettings {
   zlibrary_password_set: boolean;
   zlibrary_domain: string | null;
   requests_per_minute: number;
+  flaresolverr_url: string | null;
 }
 
 export interface DirectDownloadTestResponse {
@@ -1018,6 +1019,7 @@ export const directDownloadApi = {
     zlibrary_password?: string;
     zlibrary_domain?: string;
     requests_per_minute: number;
+    flaresolverr_url?: string | null;
   }) =>
     apiRequest<DirectDownloadSettings>('/api/direct-downloads/settings', {
       method: 'PUT',
@@ -1027,6 +1029,12 @@ export const directDownloadApi = {
   testConnection: () =>
     apiRequest<DirectDownloadTestResponse>('/api/direct-downloads/test', {
       method: 'POST',
+    }),
+
+  testFlaresolverr: (url: string) =>
+    apiRequest<{ success: boolean; message: string }>('/api/direct-downloads/test-flaresolverr', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
     }),
 
   resetSettings: () =>

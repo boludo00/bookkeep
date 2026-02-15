@@ -11,6 +11,12 @@ from urllib.parse import quote_plus
 import structlog
 
 from .base import DirectProvider, DirectSearchResult
+from ...flaresolverr import (
+    FlareSolverrClient,
+    FlareSolverrError,
+    is_cloudflare_challenge,
+    cookie_cache,
+)
 
 logger = structlog.get_logger()
 
@@ -46,7 +52,8 @@ class ZLibraryProvider(DirectProvider):
         email: Optional[str] = None,
         password: Optional[str] = None,
         domain: Optional[str] = None,
-        timeout: float = 30.0
+        timeout: float = 30.0,
+        flaresolverr_url: Optional[str] = None,
     ):
         """
         Initialize Z-Library provider.
@@ -56,11 +63,13 @@ class ZLibraryProvider(DirectProvider):
             password: Z-Library account password (optional)
             domain: Custom domain to use
             timeout: Request timeout in seconds
+            flaresolverr_url: Optional FlareSolverr URL for Cloudflare bypass
         """
         self.custom_domain = domain
         self.email = email
         self.password = password
         self.timeout = timeout
+        self.flaresolverr_url = flaresolverr_url
         self._client: Optional[httpx.AsyncClient] = None
         self._authenticated = False
         self._cookies: Dict[str, str] = {}
@@ -266,8 +275,33 @@ class ZLibraryProvider(DirectProvider):
             )
 
             # Check for Cloudflare or access issues
-            if response.status_code == 403 or "cf-browser-verification" in response.text.lower():
+            if is_cloudflare_challenge(response.text, response.status_code):
                 logger.warning("zlibrary_cloudflare_blocked", mirror=mirror)
+
+                # Try FlareSolverr if configured
+                if self.flaresolverr_url:
+                    logger.info("zlibrary_trying_flaresolverr", url=search_url)
+                    try:
+                        fs_client = FlareSolverrClient(self.flaresolverr_url)
+                        fs_result = await fs_client.solve(search_url)
+                        await fs_client.close()
+
+                        # Cache cookies for future requests
+                        if mirror and fs_result.cookies:
+                            cookie_cache.store(mirror, fs_result.cookies)
+
+                        # Parse FlareSolverr HTML instead
+                        results = self._parse_search_results(fs_result.html, format_type, base_url)
+                        logger.info(
+                            "zlibrary_search_complete",
+                            query=query,
+                            results_count=len(results),
+                            via="flaresolverr",
+                        )
+                        return results
+                    except FlareSolverrError as e:
+                        logger.warning("zlibrary_flaresolverr_failed", error=str(e))
+
                 self._working_mirror = None
                 return []
 

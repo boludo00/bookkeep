@@ -312,6 +312,9 @@ class DirectDownloadSettings(Base):
     # Rate limiting
     requests_per_minute = Column(Integer, default=10)
 
+    # FlareSolverr for Cloudflare bypass
+    flaresolverr_url = Column(String, nullable=True)
+
     # Metadata
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

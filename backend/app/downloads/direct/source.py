@@ -56,10 +56,16 @@ class DirectDownloadSource(ReleaseSource):
             logger.debug("direct_source_disabled")
             return
 
+        # Get FlareSolverr URL if configured
+        flaresolverr_url = getattr(settings, 'flaresolverr_url', None)
+
         # Initialize enabled providers
         if settings.annas_archive_enabled:
             self._providers.append(
-                AnnasArchiveProvider(mirror=settings.annas_archive_mirror)
+                AnnasArchiveProvider(
+                    mirror=settings.annas_archive_mirror,
+                    flaresolverr_url=flaresolverr_url,
+                )
             )
             logger.debug("direct_provider_loaded", provider="annas_archive")
 
@@ -69,6 +75,7 @@ class DirectDownloadSource(ReleaseSource):
                     email=settings.zlibrary_email,
                     password=settings.zlibrary_password,
                     domain=settings.zlibrary_domain,
+                    flaresolverr_url=flaresolverr_url,
                 )
             )
             logger.debug("direct_provider_loaded", provider="zlibrary")
