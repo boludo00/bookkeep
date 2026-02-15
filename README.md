@@ -97,6 +97,16 @@ services:
       - redis_data:/data
     restart: unless-stopped
 
+  # Optional: FlareSolverr for direct downloads (solves DDoS-Guard challenges)
+  # flaresolverr:
+  #   image: ghcr.io/flaresolverr/flaresolverr:latest
+  #   container_name: bookkeep-flaresolverr
+  #   environment:
+  #     LOG_LEVEL: info
+  #   ports:
+  #     - "8191:8191"
+  #   restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:
@@ -137,6 +147,52 @@ openssl rand -base64 32
 ```
 
 If not set, a random key is generated at startup. This means **all users will be logged out when the server restarts**. For persistent sessions across restarts, always set this variable.
+
+## Direct Downloads
+
+Bookkeep can download books directly from Anna's Archive and Z-Library without requiring Prowlarr or external download clients. Enable this feature in **Settings > Direct Downloads**.
+
+### How it works
+
+When you search for a book, direct download results appear alongside Prowlarr results. The backend handles the full download lifecycle: finding sources, waiting through server countdowns, solving access challenges, and streaming the file to your configured download path.
+
+### FlareSolverr (recommended)
+
+Anna's Archive slow download servers are protected by DDoS-Guard. To access these sources, you need a running [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) instance to solve the challenges.
+
+Add FlareSolverr to your `docker-compose.yml`:
+
+```yaml
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: bookkeep-flaresolverr
+    environment:
+      LOG_LEVEL: info
+    ports:
+      - "8191:8191"
+    restart: unless-stopped
+```
+
+Then set the FlareSolverr URL in **Settings > Direct Downloads** to:
+
+```
+http://flaresolverr:8191
+```
+
+Without FlareSolverr, direct downloads will still work but only with sources that don't require challenge solving, which significantly reduces the number of available sources.
+
+### Download paths
+
+Configure your ebook and audiobook download paths in **Settings > Direct Downloads**. The paths must be accessible from within the Docker container. For example, add a volume mount:
+
+```yaml
+  app:
+    volumes:
+      - /path/on/host/ebooks:/downloads/ebooks
+      - /path/on/host/audiobooks:/downloads/audiobooks
+```
+
+Then set the download paths in settings to `/downloads/ebooks` and `/downloads/audiobooks`.
 
 ## Jobs & Scheduling
 
