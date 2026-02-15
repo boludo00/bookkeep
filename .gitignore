@@ -42,3 +42,6 @@ dist-ssr
 # Single-container deployment
 data/
 frontend_dist/
+
+# Local dev overrides
+dev.docker-compose.yml
