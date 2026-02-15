@@ -3,6 +3,7 @@ Prowlarr release source implementation.
 
 Searches for book releases via Prowlarr and returns standardized Release objects.
 """
+import re
 from typing import List, Optional
 import structlog
 
@@ -14,6 +15,7 @@ from .utils import (
     is_audiobook,
     build_search_queries,
     calculate_quality_score,
+    normalize_title,
 )
 
 logger = structlog.get_logger()
@@ -143,7 +145,7 @@ class ProwlarrSource(ReleaseSource):
         # Convert to Release objects with author validation
         releases = []
         for result in all_results:
-            release = self._convert_to_release(result, format_type, author)
+            release = self._convert_to_release(result, format_type, author, title)
             if release:
                 releases.append(release)
 
@@ -163,7 +165,8 @@ class ProwlarrSource(ReleaseSource):
         self,
         prowlarr_result: dict,
         format_type: str,
-        expected_author: Optional[str] = None
+        expected_author: Optional[str] = None,
+        expected_title: Optional[str] = None
     ) -> Optional[Release]:
         """
         Convert Prowlarr result to Release object.
@@ -172,6 +175,7 @@ class ProwlarrSource(ReleaseSource):
             prowlarr_result: Raw result from Prowlarr
             format_type: Expected format type ("ebook" or "audiobook")
             expected_author: Expected author name for validation (optional)
+            expected_title: Expected book title for validation (optional)
 
         Returns:
             Release object or None if invalid
@@ -190,6 +194,15 @@ class ProwlarrSource(ReleaseSource):
                 "prowlarr_author_mismatch",
                 release_title=title[:100],
                 expected_author=expected_author
+            )
+            return None
+
+        # Validate title if provided - prevents grabbing wrong books by same author
+        if expected_title and not self._title_matches(title, expected_title):
+            logger.debug(
+                "prowlarr_title_mismatch",
+                release_title=title[:100],
+                expected_title=expected_title
             )
             return None
 
@@ -301,6 +314,111 @@ class ProwlarrSource(ReleaseSource):
                 return True
 
         return False
+
+    # Stop words excluded when computing word overlap for title matching
+    _STOP_WORDS = frozenset({
+        "the", "a", "an", "and", "or", "of", "in", "on", "at", "to", "for",
+        "is", "it", "by", "with", "from", "as", "but", "not", "no", "be",
+    })
+
+    def _title_matches(self, release_title: str, expected_title: str) -> bool:
+        """
+        Check if a release title matches the expected book title.
+
+        Uses two strategies based on title length:
+        - Short titles (1-2 words): segment-based exact matching to prevent
+          partial matches (e.g. "It" matching "You Like It Darker")
+        - Longer titles (3+ words): substring containment and word overlap
+
+        Args:
+            release_title: The release title from the indexer
+            expected_title: The expected book title
+
+        Returns:
+            True if the title appears to match, False otherwise
+        """
+        if not expected_title:
+            return True
+
+        normalized_release = normalize_title(release_title).lower()
+        normalized_expected = expected_title.lower().strip()
+
+        if not normalized_expected:
+            return True
+
+        # Use total word count to decide strategy (not significant words)
+        is_short_title = len(normalized_expected.split()) <= 2
+
+        if is_short_title:
+            # Short titles only use strict segment matching
+            return self._short_title_matches(normalized_release, normalized_expected)
+
+        # For longer titles, direct substring containment is safe
+        if normalized_expected in normalized_release:
+            return True
+
+        expected_words = [
+            w for w in normalized_expected.split()
+            if w not in self._STOP_WORDS
+        ]
+        return self._long_title_matches(
+            normalized_release, normalized_expected, expected_words
+        )
+
+    def _short_title_matches(
+        self, normalized_release: str, normalized_expected: str
+    ) -> bool:
+        """
+        Match short titles (1-2 words) using strict segment-based matching.
+
+        Splits the release title on common delimiters (" - ", " by ") and checks
+        if any segment exactly equals the expected title. This prevents false
+        positives like "You Like It Darker" matching "It" or "Dune Messiah"
+        matching "Dune".
+        """
+        # Split on common release title delimiters
+        segments = re.split(r'\s+-\s+|\s+by\s+', normalized_release)
+
+        for segment in segments:
+            segment = segment.strip()
+            if not segment:
+                continue
+
+            # Exact segment match (after normalize_title already stripped
+            # format tags, brackets, years, etc.)
+            if segment == normalized_expected:
+                return True
+
+        return False
+
+    def _long_title_matches(
+        self,
+        normalized_release: str,
+        normalized_expected: str,
+        expected_words: list
+    ) -> bool:
+        """
+        Match longer titles (3+ significant words) using word overlap.
+
+        Checks substring containment, subtitle matching, and requires 60%+
+        of significant words to appear in the release.
+        """
+        # Subtitle matching: split on ":" or " - " and check each part
+        subtitle_parts = re.split(r'[:\-]\s*', normalized_expected)
+        for part in subtitle_parts:
+            part = part.strip()
+            if part and part in normalized_release:
+                return True
+
+        # Word overlap: at least 60% of significant words must appear
+        if not expected_words:
+            return True
+
+        release_words = set(normalized_release.split())
+        matched = sum(1 for w in expected_words if w in release_words)
+        ratio = matched / len(expected_words)
+
+        return ratio >= 0.6
 
     def search_by_isbn(self, isbn: str, format_type: str = "ebook") -> List[Release]:
         """
