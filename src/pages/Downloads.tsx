@@ -21,6 +21,7 @@ import {
 import { toast } from 'sonner';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { downloadsApi } from '@/lib/api';
+import { DownloadLogPanel } from '@/components/downloads/DownloadLogPanel';
 
 interface DownloadTask {
   id: number;
@@ -509,10 +510,46 @@ export default function Downloads() {
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      <Badge variant={getStateBadgeVariant(task.state)} className="gap-1">
-                        {getStateIcon(task.state)}
-                        {getDetailedStatus(task.state, task.client_state)}
-                      </Badge>
+                      <div className="flex flex-col gap-1">
+                        {task.state === 'error' ? (
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div>
+                                  <Badge variant={getStateBadgeVariant(task.state)} className="gap-1 cursor-help">
+                                    {getStateIcon(task.state)}
+                                    {getDetailedStatus(task.state, task.client_state)}
+                                  </Badge>
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent className="max-w-sm bg-popover border-border">
+                                <p className="text-xs">
+                                  {task.message?.includes('403') || task.message?.toLowerCase().includes('sources failed')
+                                    ? 'Direct download sources blocked. Try torrent/usenet instead.'
+                                    : task.message?.toLowerCase().includes('no path')
+                                    ? 'Configure download path in Settings'
+                                    : 'Check download log for details'}
+                                </p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        ) : (
+                          <Badge variant={getStateBadgeVariant(task.state)} className="gap-1">
+                            {getStateIcon(task.state)}
+                            {getDetailedStatus(task.state, task.client_state)}
+                          </Badge>
+                        )}
+                        {(task.state === 'downloading' || task.state === 'queued') && task.protocol === 'direct' && task.message && (
+                          <span className="text-xs text-primary font-medium truncate max-w-[180px]" title={task.message}>
+                            {task.message}
+                          </span>
+                        )}
+                        {task.state === 'error' && task.protocol === 'direct' && task.message && (
+                          <span className="text-xs text-destructive font-medium truncate max-w-[180px]" title={task.message}>
+                            {task.message}
+                          </span>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell>
                       {task.import_status === 'failed' && task.import_message ? (
@@ -557,7 +594,7 @@ export default function Downloads() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <div className="w-full max-w-[120px]">
+                      <div className="w-full max-w-[150px]">
                         <div className="flex items-center justify-between mb-1">
                           <span className="text-xs text-muted-foreground">
                             {task.progress.toFixed(0)}%
@@ -582,6 +619,8 @@ export default function Downloads() {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
+                        {/* Show log button for direct downloads */}
+                        <DownloadLogPanel taskId={task.id} protocol={task.protocol} />
                         {/* Show import button when:
                             1. Download is complete/seeding
                             2. Import hasn't succeeded

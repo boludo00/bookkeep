@@ -32,7 +32,7 @@ fi
 # Then migrations will add any missing columns (idempotent)
 cd /app
 echo "Creating database tables if they don't exist..."
-python -c "from app.database import engine, Base; Base.metadata.create_all(bind=engine); print('✓ Tables created/verified')"
+python -c "from app.database import engine, Base; Base.metadata.create_all(bind=engine); print('Tables created/verified')"
 
 # Now run migrations to add any missing columns
 cd /app/backend
@@ -42,10 +42,10 @@ echo "Checking Alembic version..."
 python -m alembic -c alembic.ini current || echo "No current version (database may be new)"
 echo "Running migrations..."
 if python -m alembic -c alembic.ini upgrade head 2>&1; then
-    echo "✓ Alembic migrations completed successfully"
+    echo "Alembic migrations completed successfully"
     python -m alembic -c alembic.ini current
 else
-    echo "✗ WARNING: Alembic migrations had issues (this is okay if columns already exist)"
+    echo "WARNING: Alembic migrations had issues (this is okay if columns already exist)"
 fi
 
 # Start the application from /app (where uvicorn expects to find backend module)

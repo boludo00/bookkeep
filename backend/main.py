@@ -9,7 +9,7 @@ import sys
 import os
 
 from app.database import engine, Base
-from app.routers import users, books, hardcover, requests, settings, readarr, jobs, booklore, audiobookshelf, auth, download_settings, downloads
+from app.routers import users, books, hardcover, requests, settings, readarr, jobs, booklore, audiobookshelf, auth, download_settings, downloads, direct_downloads
 from app import cache
 
 # Configure Python's standard logging to emit structlog-style console output.
@@ -107,6 +107,7 @@ app.include_router(booklore.router, prefix="/api/booklore", tags=["booklore"])
 app.include_router(audiobookshelf.router, prefix="/api/audiobookshelf", tags=["audiobookshelf"])
 app.include_router(download_settings.router, prefix="/api/download-settings", tags=["download-settings"])
 app.include_router(downloads.router, prefix="/api/downloads", tags=["downloads"])
+app.include_router(direct_downloads.router, prefix="/api/direct-downloads", tags=["direct-downloads"])
 app.include_router(auth.router)  # No prefix, it's already in the router
 
 enable_debug_routes = os.getenv("bookkeep_DEBUG_ROUTES", "").lower() in {"1", "true", "yes"}

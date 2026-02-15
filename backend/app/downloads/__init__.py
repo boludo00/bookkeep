@@ -351,8 +351,17 @@ except ImportError as e:
     pass  # Prowlarr dependencies may not be installed
 
 try:
+    from .direct import source as _direct_source  # noqa: F401
+except ImportError as e:
+    import structlog
+    logger = structlog.get_logger()
+    logger.warning("direct_source_import_failed", error=str(e))
+    pass  # Direct download dependencies may not be installed
+
+try:
     from .handlers import torrent as _torrent_handler  # noqa: F401
     from .handlers import usenet as _usenet_handler  # noqa: F401
+    from .handlers import direct as _direct_handler  # noqa: F401
 except ImportError as e:
     import structlog
     logger = structlog.get_logger()
