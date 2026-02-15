@@ -11,6 +11,9 @@ services:
       DATABASE_URL: postgresql://bookhound:bookhound_password@db:5432/bookhound_db
       HARDCOVER_API_TOKEN: ${HARDCOVER_API_TOKEN:-}
       REDIS_URL: redis://redis:6379/0
+      BOOKKEEP_SECRET_KEY: ${BOOKKEEP_SECRET_KEY:-}
+    volumes:
+      - /Users/gperrone/Downloads:/data
     ports:
       - "8000:8000"
     depends_on:
@@ -40,6 +43,15 @@ services:
       - redis_data:/data
     restart: unless-stopped
 
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: book-hound-flaresolverr
+    environment:
+      LOG_LEVEL: info
+    ports:
+      - "8191:8191"
+    restart: unless-stopped
+
 # Optional: Uncomment if you want Redis caching
 #  redis:
 #    image: redis:7-alpine
@@ -48,17 +60,6 @@ services:
 #      - redis_data:/data
 #    networks:
 #      - book-hound-network
-
-  # Optional: FlareSolverr for Cloudflare bypass (used by direct downloads)
-  # Uncomment to enable. Set the URL in Direct Download Settings to http://flaresolverr:8191
-  # flaresolverr:
-  #   image: ghcr.io/flaresolverr/flaresolverr:latest
-  #   container_name: book-hound-flaresolverr
-  #   environment:
-  #     LOG_LEVEL: info
-  #   ports:
-  #     - "8191:8191"
-  #   restart: unless-stopped
 
 volumes:
   postgres_data:
