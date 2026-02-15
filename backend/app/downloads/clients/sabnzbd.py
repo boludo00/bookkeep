@@ -32,6 +32,7 @@ class SabnzbdClient:
         port: int = 8080,
         api_key: Optional[str] = None,
         use_ssl: bool = False,
+        url_base: Optional[str] = None,
         category: Optional[str] = None,
         path_mappings: Optional[Dict[str, str]] = None,
     ):
@@ -43,6 +44,7 @@ class SabnzbdClient:
             port: Sabnzbd port (default: 8080)
             api_key: Sabnzbd API key
             use_ssl: Use HTTPS connection
+            url_base: URL base path for reverse proxy (e.g., "/sabnzbd")
             category: Default category for downloads
             path_mappings: Docker path mappings {"container_path": "host_path"}
         """
@@ -50,12 +52,14 @@ class SabnzbdClient:
         self.port = port
         self.api_key = api_key or ""
         self.use_ssl = use_ssl
+        self.url_base = url_base
         self.category = category
         self.path_mappings = path_mappings or {}
 
         # Build base URL
         protocol = "https" if use_ssl else "http"
-        self.base_url = f"{protocol}://{self.host}:{self.port}/api"
+        base_path = f"/{self.url_base.strip('/')}" if self.url_base else ""
+        self.base_url = f"{protocol}://{self.host}:{self.port}{base_path}/api"
 
         self.session = requests.Session()
 

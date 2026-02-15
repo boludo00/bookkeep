@@ -68,6 +68,14 @@ services:
       DATABASE_URL: postgresql://bookkeep:bookkeep_password@db:5432/bookkeep_db
       HARDCOVER_API_TOKEN: ${HARDCOVER_API_TOKEN:-}
       REDIS_URL: redis://redis:6379/0
+      BOOKKEEP_SECRET_KEY: ${BOOKKEEP_SECRET_KEY:-}
+    # volumes:
+    #   # Mount host download directories so Bookkeep can access completed downloads.
+    #   # Adjust the left side (host path) to match your download client's output directory.
+    #   - /path/to/downloads:/downloads
+    #   # Example: separate mounts for different media types
+    #   # - /data/media/ebooks:/downloads/ebooks
+    #   # - /data/media/audiobooks:/downloads/audiobooks
     ports:
       - "8000:8000"
     depends_on:
@@ -118,6 +126,69 @@ Run it:
 docker-compose -f docker-compose.dockerhub.yml up
 ```
 
+## Local Development with Docker
+
+For local development, create a `dev.docker-compose.yml` (gitignored) based on the production compose file. This lets you add personal paths, volume mounts, and other dev-specific overrides without affecting the committed config.
+
+```yaml
+version: '3.8'
+
+services:
+  app:
+    image: book-hound:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: book-hound
+    environment:
+      DATABASE_URL: postgresql://bookhound:bookhound_password@db:5432/bookhound_db
+      HARDCOVER_API_TOKEN: ${HARDCOVER_API_TOKEN:-}
+      REDIS_URL: redis://redis:6379/0
+      BOOKKEEP_SECRET_KEY: ${BOOKKEEP_SECRET_KEY:-}
+    volumes:
+      # Map your host download directory into the container
+      - /path/to/downloads:/downloads
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      - redis
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    container_name: book-hound-db
+    environment:
+      POSTGRES_DB: bookhound_db
+      POSTGRES_USER: bookhound
+      POSTGRES_PASSWORD: bookhound_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: book-hound-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+```
+
+Run it:
+
+```sh
+export HARDCOVER_API_TOKEN=your_token_here
+docker-compose -f dev.docker-compose.yml up --build
+```
+
 ## Configuration
 
 Required environment variables:
@@ -129,6 +200,25 @@ Optional:
 - `BOOKKEEP_SECRET_KEY` - JWT secret key for token signing (see Authentication below)
 - `BOOKKEEP_ACCESS_TOKEN_EXPIRE_MINUTES` - Access token expiration (default: 30)
 - `BOOKKEEP_REFRESH_TOKEN_EXPIRE_DAYS` - Refresh token expiration (default: 7)
+
+## Download Client Volumes
+
+If you use download clients (qBittorrent, NZBGet, SABnzbd) running in Docker alongside Bookkeep, you need shared volume mounts so the Bookkeep container can access completed downloads on the host filesystem.
+
+Uncomment and adjust the `volumes` section in your compose file:
+
+```yaml
+    volumes:
+      # Map your host download directory into the container
+      - /path/to/downloads:/downloads
+      # Or separate mounts for different media types
+      - /data/media/ebooks:/downloads/ebooks
+      - /data/media/audiobooks:/downloads/audiobooks
+```
+
+The **container path** (right side, e.g. `/downloads`) is what you configure in **Settings > Download Clients** as the download directory. The **host path** (left side) should match where your download client writes completed files.
+
+> **Tip:** If your download client runs in its own container, mount the same host directory into both containers so the paths align. For example, if qBittorrent saves to `/data/downloads` on the host, mount `-v /data/downloads:/downloads` in both containers.
 
 ## Authentication
 

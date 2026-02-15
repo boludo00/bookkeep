@@ -533,9 +533,9 @@ export const settingsApi = {
     }),
 
   getDownloadPaths: () =>
-    apiRequest<{ ebook_download_path: string | null; audiobook_download_path: string | null }>('/api/settings/download-paths'),
+    apiRequest<{ ebook_download_path: string | null; audiobook_download_path: string | null; use_hardlinks: boolean }>('/api/settings/download-paths'),
 
-  updateDownloadPaths: (paths: { ebook_download_path?: string; audiobook_download_path?: string }) =>
+  updateDownloadPaths: (paths: { ebook_download_path?: string; audiobook_download_path?: string; use_hardlinks?: boolean }) =>
     apiRequest<{ message: string }>('/api/settings/download-paths', {
       method: 'PUT',
       body: JSON.stringify(paths),
@@ -557,6 +557,14 @@ export const settingsApi = {
 
   debugCacheKeys: () =>
     apiRequest<{ total_keys: number; sample_keys: string[]; namespace: string }>('/api/settings/cache/debug'),
+
+  browseDirectories: (path: string) =>
+    apiRequest<{
+      current_path: string;
+      parent_path: string | null;
+      directories: Array<{ name: string; path: string }>;
+      error: string | null;
+    }>(`/api/settings/browse-directories?path=${encodeURIComponent(path)}`),
 };
 
 // Readarr API endpoints
@@ -687,6 +695,8 @@ export interface BookloreServer {
   url: string;
   username: string;
   is_default: boolean;
+  ebook_library_id: number | null;
+  audiobook_library_id: number | null;
   created_at: string;
   updated_at?: string;
 }
@@ -704,13 +714,13 @@ export const bookloreApi = {
   getById: (id: number) =>
     apiRequest<BookloreServer>(`/api/booklore/${id}`),
 
-  create: (server: { name: string; url: string; username: string; password: string; is_default?: boolean }) =>
+  create: (server: { name: string; url: string; username: string; password: string; is_default?: boolean; ebook_library_id?: number | null; audiobook_library_id?: number | null }) =>
     apiRequest<BookloreServer>('/api/booklore/', {
       method: 'POST',
       body: JSON.stringify(server),
     }),
 
-  update: (id: number, server: { name?: string; url?: string; username?: string; password?: string; is_default?: boolean }) =>
+  update: (id: number, server: { name?: string; url?: string; username?: string; password?: string; is_default?: boolean; ebook_library_id?: number | null; audiobook_library_id?: number | null }) =>
     apiRequest<BookloreServer>(`/api/booklore/${id}`, {
       method: 'PUT',
       body: JSON.stringify(server),
@@ -732,6 +742,57 @@ export const bookloreApi = {
 
   checkBook: (serverId: number, hardcoverId: number) =>
     apiRequest<{ available: boolean; book?: any }>(`/api/booklore/${serverId}/check/${hardcoverId}`),
+};
+
+// Audiobookshelf API endpoints
+export interface AudiobookshelfServer {
+  id: number;
+  name: string;
+  url: string;
+  is_default: boolean;
+  library_id: string | null;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface AudiobookshelfTestResponse {
+  success: boolean;
+  error?: string;
+  libraries?: Array<{ id: string; name: string; mediaType: string }>;
+}
+
+export const audiobookshelfApi = {
+  getAll: () =>
+    apiRequest<Array<AudiobookshelfServer>>('/api/audiobookshelf/'),
+
+  getById: (id: number) =>
+    apiRequest<AudiobookshelfServer>(`/api/audiobookshelf/${id}`),
+
+  create: (server: { name: string; url: string; api_key: string; is_default?: boolean; library_id?: string | null }) =>
+    apiRequest<AudiobookshelfServer>('/api/audiobookshelf/', {
+      method: 'POST',
+      body: JSON.stringify(server),
+    }),
+
+  update: (id: number, server: { name?: string; url?: string; api_key?: string; is_default?: boolean; library_id?: string | null }) =>
+    apiRequest<AudiobookshelfServer>(`/api/audiobookshelf/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(server),
+    }),
+
+  delete: (id: number) =>
+    apiRequest<void>(`/api/audiobookshelf/${id}`, {
+      method: 'DELETE',
+    }),
+
+  testConnection: (config: { url: string; api_key: string }) =>
+    apiRequest<AudiobookshelfTestResponse>('/api/audiobookshelf/test', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    }),
+
+  getItems: (serverId: number) =>
+    apiRequest<Array<any>>(`/api/audiobookshelf/${serverId}/items`),
 };
 
 // Download Settings API endpoints
@@ -767,6 +828,7 @@ export interface DownloadClient {
   username: string | null;
   password: string;
   api_key: string | null;
+  url_base: string | null;
   enabled: boolean;
   priority: number;
   category: string | null;
@@ -824,13 +886,13 @@ export const downloadSettingsApi = {
   getDownloadClients: () =>
     apiRequest<Array<DownloadClient>>('/api/download-settings/download-clients'),
 
-  createDownloadClient: (client: { name: string; type: string; protocol: string; host: string; port: number; use_ssl?: boolean; username?: string; password?: string; api_key?: string; enabled?: boolean; priority?: number; category?: string; ebook_category?: string; audiobook_category?: string; path_mappings_json?: string }) =>
+  createDownloadClient: (client: { name: string; type: string; protocol: string; host: string; port: number; use_ssl?: boolean; username?: string; password?: string; api_key?: string; url_base?: string; enabled?: boolean; priority?: number; category?: string; ebook_category?: string; audiobook_category?: string; path_mappings_json?: string }) =>
     apiRequest<DownloadClient>('/api/download-settings/download-clients', {
       method: 'POST',
       body: JSON.stringify(client),
     }),
 
-  updateDownloadClient: (id: number, client: { name?: string; type?: string; protocol?: string; host?: string; port?: number; use_ssl?: boolean; username?: string; password?: string; api_key?: string; enabled?: boolean; priority?: number; category?: string; ebook_category?: string; audiobook_category?: string; path_mappings_json?: string }) =>
+  updateDownloadClient: (id: number, client: { name?: string; type?: string; protocol?: string; host?: string; port?: number; use_ssl?: boolean; username?: string; password?: string; api_key?: string; url_base?: string; enabled?: boolean; priority?: number; category?: string; ebook_category?: string; audiobook_category?: string; path_mappings_json?: string }) =>
     apiRequest<DownloadClient>(`/api/download-settings/download-clients/${id}`, {
       method: 'PUT',
       body: JSON.stringify(client),
@@ -841,7 +903,7 @@ export const downloadSettingsApi = {
       method: 'DELETE',
     }),
 
-  testDownloadClient: (config: { type: string; protocol: string; host: string; port: number; use_ssl: boolean; username?: string; password?: string; api_key?: string }) =>
+  testDownloadClient: (config: { type: string; protocol: string; host: string; port: number; use_ssl: boolean; username?: string; password?: string; api_key?: string; url_base?: string }) =>
     apiRequest<DownloadClientTestResponse>('/api/download-settings/download-clients/test', {
       method: 'POST',
       body: JSON.stringify(config),
