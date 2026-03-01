@@ -143,7 +143,7 @@ async def check_book_availability(book: models.Book, db: Session) -> dict:
     }
 
 @router.post("/", response_model=schemas.BookResponse, status_code=status.HTTP_201_CREATED)
-def create_book(book: schemas.BookCreate, db: Session = Depends(database.get_db), current_user: models.User = Depends(require_admin)):
+def create_book(book: schemas.BookCreate, db: Session = Depends(database.get_db), current_user: models.User = Depends(get_current_user)):
     book_dict = book.model_dump()
     
     # Check if book already exists by hardcover_id
