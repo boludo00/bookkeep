@@ -213,9 +213,12 @@ async def oidc_callback(
                     jwks,
                     algorithms=["RS256", "ES256"],
                     audience=client_id,
-                    issuer=issuer_url.rstrip("/"),
-                    options={"verify_at_hash": False},
+                    options={"verify_at_hash": False, "verify_iss": False},
                 )
+                token_issuer = id_claims.get("iss", "")
+                if token_issuer.rstrip("/") != issuer_url.rstrip("/"):
+                    logger.warning("oidc_issuer_mismatch", expected=issuer_url, got=token_issuer)
+                    return RedirectResponse(url="/login?error=issuer_mismatch", status_code=302)
                 token_nonce = id_claims.get("nonce", "")
                 if token_nonce != expected_nonce:
                     logger.warning("oidc_nonce_mismatch", expected=expected_nonce[:8], got=token_nonce[:8])
