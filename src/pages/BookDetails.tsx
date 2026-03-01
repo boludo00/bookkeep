@@ -23,7 +23,7 @@ export default function BookDetails() {
   const [searchFormat, setSearchFormat] = useState<'ebook' | 'audiobook'>('ebook');
   const [searchSource, setSearchSource] = useState<'prowlarr' | 'direct' | undefined>(undefined);
   const queryClient = useQueryClient();
-  const { user } = useUser();
+  const { user, isAdmin } = useUser();
   const isVisible = usePageVisibility();
   const bypassCache =
     searchParams.get('bypass_cache') === 'true' || searchParams.get('bypass_cache') === '1';
@@ -333,7 +333,7 @@ export default function BookDetails() {
                   <div className="group flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
                     <BookOpen className="h-4 w-4 text-emerald-400" />
                     <span className="text-sm font-medium text-emerald-400">eBook Available</span>
-                    {dbBook?.id && dbBook.ebook_available && (
+                    {isAdmin && dbBook?.id && dbBook.ebook_available && (
                       <button
                         onClick={() => {
                           if (window.confirm('Clear eBook availability? This will allow you to re-download this book.')) {
@@ -352,7 +352,7 @@ export default function BookDetails() {
                   <div className="group flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-500/10 border border-violet-500/30">
                     <Headphones className="h-4 w-4 text-violet-400" />
                     <span className="text-sm font-medium text-violet-400">Audiobook Available</span>
-                    {dbBook?.id && dbBook.audiobook_available && (
+                    {isAdmin && dbBook?.id && dbBook.audiobook_available && (
                       <button
                         onClick={() => {
                           if (window.confirm('Clear audiobook availability? This will allow you to re-download this book.')) {

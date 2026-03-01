@@ -13,6 +13,8 @@ import json
 
 from ..database import get_db
 from ..models import Book, ProwlarrServer, DownloadClient, DownloadTask, AppSettings, DirectDownloadSettings
+from app.auth import require_admin, get_current_user
+from app import models
 from ..downloads.prowlarr import ProwlarrSource
 from ..downloads import DownloadOrchestrator
 from ..downloads.handlers.direct import get_download_log
@@ -132,6 +134,7 @@ async def search_releases(
     book_id: int,
     format_type: str,  # "ebook" or "audiobook"
     source_filter: Optional[str] = None,  # "prowlarr", "direct", or None for all
+    current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -292,6 +295,7 @@ async def search_releases(
 @router.post("/download", response_model=DownloadResponse)
 async def start_download(
     request: DownloadRequest,
+    current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -381,6 +385,7 @@ async def start_download(
 async def auto_download(
     book_id: int,
     format_type: str,  # "ebook" or "audiobook"
+    current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -446,6 +451,7 @@ async def get_download_tasks(
     skip: int = 0,
     limit: int = 100,
     state: Optional[str] = None,
+    current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -494,6 +500,7 @@ async def get_download_tasks(
 @router.get("/tasks/{task_id}/log")
 async def get_download_task_log(
     task_id: int,
+    current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -530,6 +537,7 @@ async def get_download_task_log(
 @router.post("/import/{task_id}")
 async def import_download(
     task_id: int,
+    current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -625,6 +633,7 @@ async def import_download(
 @router.delete("/task/{task_id}")
 async def delete_task(
     task_id: int,
+    current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -666,6 +675,7 @@ async def delete_task(
 
 @router.delete("/tasks/clear")
 async def clear_tasks(
+    current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """

@@ -25,6 +25,12 @@ def get_hardcover_token(db: Session) -> tuple[str, str]:
     
     return ("", "none")
 
+@router.get("/hardcover-token/check")
+async def check_hardcover_token(db: Session = Depends(get_db)):
+    """Check if Hardcover API token is configured (any user)."""
+    token, source = get_hardcover_token(db)
+    return {"has_hardcover_token": bool(token)}
+
 @router.get("/hardcover-token", response_model=schemas.SettingsResponse)
 async def get_hardcover_token_status(
     db: Session = Depends(get_db),

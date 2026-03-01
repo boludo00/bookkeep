@@ -8,6 +8,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { requestsApi } from '@/lib/api';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
+import { useUser } from '@/contexts/UserContext';
 import type { BookRequest } from '@/types/book';
 
 const statusConfig = {
@@ -51,6 +52,7 @@ function getUserInitials(name: string): string {
 
 function RequestRow({ request, index }: { request: BookRequest; index: number }) {
   const queryClient = useQueryClient();
+  const { isAdmin } = useUser();
   const status = statusConfig[request.status] ?? statusConfig.requested;
   const StatusIcon = status.icon;
   const isProcessing = request.status === 'processing';
@@ -198,7 +200,7 @@ function RequestRow({ request, index }: { request: BookRequest; index: number })
 
           {/* Action buttons */}
           <div className="flex flex-col gap-2 pt-2">
-            {isProcessing && (
+            {isProcessing && isAdmin && (
               <Button
                 size="sm"
                 onClick={() => markAvailableMutation.mutate()}

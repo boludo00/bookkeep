@@ -9,6 +9,7 @@ import { ThemeProvider } from "@/contexts/ThemeContext";
 import { AuthWrapper } from "@/components/AuthWrapper";
 import { Loader2 } from "lucide-react";
 import { AdminCheckWrapper } from "@/components/AdminCheckWrapper";
+import { AdminRouteGuard } from "@/components/AdminRouteGuard";
 
 // Keep Login and NotFound as static imports (entry point + tiny fallback)
 import Login from "@/pages/Login";
@@ -76,9 +77,11 @@ const App = () => (
                     <Route path="/prompt/:slug" element={<PromptDetail />} />
                     <Route path="/author" element={<Author />} />
                     <Route path="/profile" element={<Profile />} />
-                    <Route path="/admin" element={<Admin />} />
-                    <Route path="/admin/users" element={<Users />} />
-                    <Route path="/settings" element={<Settings />} />
+                    <Route element={<AdminRouteGuard />}>
+                      <Route path="/admin" element={<Admin />} />
+                      <Route path="/admin/users" element={<Users />} />
+                      <Route path="/settings" element={<Settings />} />
+                    </Route>
                   </Route>
                 </Route>
               </Route>

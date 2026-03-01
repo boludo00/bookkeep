@@ -11,6 +11,8 @@ import structlog
 
 from ..database import get_db
 from ..models import DirectDownloadSettings
+from ..auth import require_admin
+from .. import models
 
 router = APIRouter()
 logger = structlog.get_logger()
@@ -72,7 +74,7 @@ def _settings_to_response(settings: DirectDownloadSettings) -> DirectDownloadSet
 
 
 @router.get("/settings", response_model=DirectDownloadSettingsResponse)
-async def get_settings(db: Session = Depends(get_db)):
+async def get_settings(current_user: models.User = Depends(require_admin), db: Session = Depends(get_db)):
     """
     Get direct download settings.
 
@@ -101,7 +103,8 @@ async def get_settings(db: Session = Depends(get_db)):
 @router.put("/settings", response_model=DirectDownloadSettingsResponse)
 async def update_settings(
     data: DirectDownloadSettingsUpdate,
-    db: Session = Depends(get_db)
+    current_user: models.User = Depends(require_admin),
+    db: Session = Depends(get_db),
 ):
     """
     Update direct download settings.
@@ -149,7 +152,7 @@ async def update_settings(
 
 
 @router.post("/test", response_model=DirectDownloadTestResponse)
-async def test_connection(db: Session = Depends(get_db)):
+async def test_connection(current_user: models.User = Depends(require_admin), db: Session = Depends(get_db)):
     """
     Test direct download provider connections.
 
@@ -210,7 +213,7 @@ async def test_connection(db: Session = Depends(get_db)):
 
 
 @router.delete("/settings")
-async def reset_settings(db: Session = Depends(get_db)):
+async def reset_settings(current_user: models.User = Depends(require_admin), db: Session = Depends(get_db)):
     """
     Reset direct download settings to defaults.
 
@@ -238,7 +241,7 @@ class FlareSolverrTestResponse(BaseModel):
 
 
 @router.post("/test-flaresolverr", response_model=FlareSolverrTestResponse)
-async def test_flaresolverr(data: FlareSolverrTestRequest):
+async def test_flaresolverr(data: FlareSolverrTestRequest, current_user: models.User = Depends(require_admin)):
     """
     Test connectivity to a FlareSolverr instance.
 
@@ -280,7 +283,8 @@ async def debug_search(
     title: str,
     author: Optional[str] = None,
     format_type: str = "ebook",
-    db: Session = Depends(get_db)
+    current_user: models.User = Depends(require_admin),
+    db: Session = Depends(get_db),
 ):
     """
     Debug endpoint to test direct download search.

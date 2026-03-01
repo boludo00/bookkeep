@@ -433,6 +433,7 @@ export interface ApiUser {
   full_name?: string;
   is_active: boolean;
   is_admin: boolean;
+  has_password: boolean;
   can_request_ebook: boolean;
   can_request_audiobook: boolean;
   can_download: boolean;
@@ -546,6 +547,9 @@ export const usersApi = {
 
 // Settings API endpoints
 export const settingsApi = {
+  checkHardcoverToken: () =>
+    apiRequest<{ has_hardcover_token: boolean }>('/api/settings/hardcover-token/check'),
+
   getHardcoverToken: () =>
     apiRequest<{ hardcover_api_token: string | null; hardcover_api_token_source: string; has_hardcover_token: boolean }>('/api/settings/hardcover-token'),
 
