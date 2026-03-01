@@ -450,6 +450,21 @@ export interface LoginResponse {
   expires_in: number;
 }
 
+export interface OidcSettingField {
+  value: string | null;
+  source: string;
+}
+
+export interface OidcSettingsResponse {
+  enabled: boolean;
+  oidc_issuer_url: OidcSettingField;
+  oidc_client_id: OidcSettingField;
+  oidc_client_secret: OidcSettingField;
+  oidc_redirect_uri: OidcSettingField;
+  oidc_auto_register: OidcSettingField;
+  oidc_button_text: OidcSettingField;
+}
+
 // Auth API endpoints
 export const authApi = {
   login: async (username: string, password: string): Promise<LoginResponse> => {
@@ -480,6 +495,14 @@ export const authApi = {
 
   logout: () => {
     clearTokens();
+  },
+
+  getOidcConfig: async (): Promise<{ enabled: boolean; button_text: string; logout_url: string | null }> => {
+    const response = await fetch(`${API_BASE_URL}/api/auth/oidc/config`);
+    if (!response.ok) {
+      return { enabled: false, button_text: 'Sign in with SSO', logout_url: null };
+    }
+    return response.json();
   },
 };
 
@@ -565,6 +588,20 @@ export const settingsApi = {
       directories: Array<{ name: string; path: string }>;
       error: string | null;
     }>(`/api/settings/browse-directories?path=${encodeURIComponent(path)}`),
+
+  getOidcSettings: () =>
+    apiRequest<OidcSettingsResponse>('/api/settings/oidc'),
+
+  updateOidcSettings: (settings: Record<string, string>) =>
+    apiRequest<{ message: string }>('/api/settings/oidc', {
+      method: 'PUT',
+      body: JSON.stringify(settings),
+    }),
+
+  testOidcConnection: () =>
+    apiRequest<{ status: string; issuer: string; authorization_endpoint: string; token_endpoint: string; userinfo_endpoint: string }>('/api/settings/oidc/test', {
+      method: 'POST',
+    }),
 };
 
 // Readarr API endpoints
