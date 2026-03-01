@@ -9,6 +9,7 @@ from app.auth import require_admin
 from app.oidc import get_oidc_settings, is_oidc_enabled, fetch_openid_configuration, _get_oidc_value, OIDC_SETTING_KEYS
 from app.encryption import encrypt_value, decrypt_value, SENSITIVE_KEYS
 import os
+import structlog
 
 router = APIRouter()
 
@@ -25,12 +26,18 @@ def get_hardcover_token(db: Session) -> tuple[str, str]:
     return ("", "none")
 
 @router.get("/hardcover-token", response_model=schemas.SettingsResponse)
-async def get_hardcover_token_status(db: Session = Depends(get_db)):
-    """Get Hardcover API token status"""
+async def get_hardcover_token_status(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+    """Get Hardcover API token status (admin only)"""
     token, source = get_hardcover_token(db)
-    
+    masked = ""
+    if token:
+        masked = token[:4] + "****" + token[-4:] if len(token) > 8 else "****"
+
     return schemas.SettingsResponse(
-        hardcover_api_token=token if token else None,
+        hardcover_api_token=masked if token else None,
         hardcover_api_token_source=source,
         has_hardcover_token=bool(token)
     )
@@ -38,7 +45,8 @@ async def get_hardcover_token_status(db: Session = Depends(get_db)):
 @router.put("/hardcover-token")
 async def set_hardcover_token(
     update: schemas.SettingsUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
 ):
     """Set Hardcover API token (only if not set via env var)"""
     # Check if token is set via env var
@@ -115,8 +123,11 @@ def set_setting_value(db: Session, key: str, value: Optional[str]):
     db.commit()
 
 @router.get("/download-paths", response_model=DownloadPathsResponse)
-async def get_download_paths(db: Session = Depends(get_db)):
-    """Get download paths configuration"""
+async def get_download_paths(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+    """Get download paths configuration (admin only)"""
     use_hardlinks_val = get_setting_value(db, "use_hardlinks")
     use_hardlinks = use_hardlinks_val != "false"  # Default to True
 
@@ -129,9 +140,10 @@ async def get_download_paths(db: Session = Depends(get_db)):
 @router.put("/download-paths")
 async def update_download_paths(
     update: DownloadPathsUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
 ):
-    """Update download paths configuration"""
+    """Update download paths configuration (admin only)"""
     if update.ebook_download_path is not None:
         set_setting_value(db, "ebook_download_path", update.ebook_download_path)
 
@@ -281,9 +293,11 @@ async def test_oidc_connection(
             "userinfo_endpoint": discovery.get("userinfo_endpoint"),
         }
     except Exception as exc:
+        logger = structlog.get_logger(__name__)
+        logger.error("oidc_test_connection_failed", error=str(exc))
         raise HTTPException(
             status_code=400,
-            detail=f"Failed to connect to OIDC issuer: {str(exc)}",
+            detail="Failed to connect to OIDC issuer. Check the issuer URL and network connectivity.",
         )
 
 
