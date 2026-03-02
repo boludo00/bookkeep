@@ -42,6 +42,18 @@ dist-ssr
 # Dev compose override (personal paths/config)
 dev.docker-compose.yml
 
+# Claude Code tooling (local dev only)
+.claude/
+.playwright-mcp/
+
+# AI-generated planning/progress docs
+PROGRESS_PHASE*.md
+READARR_REPLACEMENT_*.md
+AUDIT_IMPROVEMENTS.md
+QUICK_START.md
+CHANGELOG.md
+CLAUDE.md
+
 # Single-container deployment
 data/
 frontend_dist/
