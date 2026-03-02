@@ -22,7 +22,7 @@ from . import (
     list_sources,
     list_handlers,
 )
-from ..models import Book, DownloadTask, AppSettings, DownloadClient
+from ..models import Book, DownloadTask, AppSettings, DownloadClient, DirectDownloadSettings
 from ..database import SessionLocal
 
 logger = structlog.get_logger()
@@ -61,7 +61,7 @@ class DownloadOrchestrator:
             db: Database session
 
         Returns:
-            List of available protocols (e.g., ["torrent"], ["torrent", "usenet"])
+            List of available protocols (e.g., ["torrent"], ["torrent", "usenet", "direct"])
         """
         session = db or self.db_session or SessionLocal()
         close_session = db is None and self.db_session is None
@@ -73,6 +73,11 @@ class DownloadOrchestrator:
             ).distinct().all()
 
             protocols = [client.protocol for client in enabled_clients if client.protocol]
+
+            # Check if direct downloads are enabled
+            direct_settings = session.query(DirectDownloadSettings).first()
+            if direct_settings and direct_settings.enabled:
+                protocols.append("direct")
 
             logger.debug(
                 "orchestrator_available_protocols",
@@ -317,8 +322,20 @@ class DownloadOrchestrator:
             task.state = "downloading"
             db.commit()
 
-            # Get appropriate handler
-            handler_name = "torrent" if task.protocol == "torrent" else "usenet"
+            # Get appropriate handler based on protocol
+            if task.protocol == "torrent":
+                handler_name = "torrent"
+            elif task.protocol == "usenet":
+                handler_name = "usenet"
+            elif task.protocol == "direct":
+                handler_name = "direct"
+            else:
+                logger.error("orchestrator_unknown_protocol", task_id=task_id, protocol=task.protocol)
+                task.state = "error"
+                task.message = f"Unknown protocol: {task.protocol}"
+                db.commit()
+                return
+
             HandlerClass = get_handler(handler_name)
             handler = HandlerClass(db_session=db)
 

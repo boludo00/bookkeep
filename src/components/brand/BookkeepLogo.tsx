@@ -7,7 +7,7 @@ type BookkeepLogoProps = ImgHTMLAttributes<HTMLImageElement> & {
 export function BookkeepLogo({ title = 'Bookkeep', className, ...props }: BookkeepLogoProps) {
   return (
     <img
-      src="/bookkeeplogo.png"
+      src="/favicon.svg"
       alt={title}
       className={['block h-full w-full object-contain', className].filter(Boolean).join(' ')}
       {...props}

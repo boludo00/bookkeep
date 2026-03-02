@@ -19,13 +19,20 @@ export function UserProvider({ children }: { children: ReactNode }) {
     return isAuthenticated();
   });
 
+  const { data: oidcConfig } = useQuery({
+    queryKey: ['oidc-config-logout'],
+    queryFn: () => authApi.getOidcConfig(),
+    staleTime: 10 * 60 * 1000,
+    retry: false,
+  });
+
   const { data: user, isLoading, refetch } = useQuery({
     queryKey: ['currentUser'],
     queryFn: async () => {
       return usersApi.getMe();
     },
     enabled: isLoggedIn,
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    staleTime: 5 * 60 * 1000,
     retry: false,
   });
 
@@ -33,7 +40,12 @@ export function UserProvider({ children }: { children: ReactNode }) {
     authApi.logout();
     setIsLoggedIn(false);
     queryClient.clear();
-    window.location.href = '/login';
+
+    if (oidcConfig?.logout_url) {
+      window.location.href = oidcConfig.logout_url;
+    } else {
+      window.location.href = '/login';
+    }
   };
 
   const refetchUser = () => {

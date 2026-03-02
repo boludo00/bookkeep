@@ -10,6 +10,8 @@ from pydantic import BaseModel
 import structlog
 import json
 
+from .. import models
+from ..auth import require_admin
 from ..database import get_db
 from ..models import ProwlarrServer, DownloadClient
 from ..downloads.prowlarr import ProwlarrClient
@@ -143,7 +145,7 @@ class DownloadClientTestRequest(BaseModel):
 
 # Prowlarr endpoints
 @router.get("/prowlarr", response_model=List[ProwlarrServerResponse])
-def get_prowlarr_servers(db: Session = Depends(get_db)):
+def get_prowlarr_servers(db: Session = Depends(get_db), current_user: models.User = Depends(require_admin)):
     """Get all Prowlarr servers"""
     servers = db.query(ProwlarrServer).all()
 
@@ -186,7 +188,8 @@ def _serialize_indexer_ids(indexer_ids: Optional[List[int]]) -> Optional[str]:
 @router.post("/prowlarr", response_model=ProwlarrServerResponse)
 def create_prowlarr_server(
     server: ProwlarrServerCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
 ):
     """Create a new Prowlarr server"""
     # Check if name exists
@@ -232,7 +235,8 @@ def create_prowlarr_server(
 def update_prowlarr_server(
     server_id: int,
     server: ProwlarrServerUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
 ):
     """Update a Prowlarr server"""
     db_server = db.query(ProwlarrServer).filter(ProwlarrServer.id == server_id).first()
@@ -281,7 +285,7 @@ def update_prowlarr_server(
 
 
 @router.delete("/prowlarr/{server_id}")
-def delete_prowlarr_server(server_id: int, db: Session = Depends(get_db)):
+def delete_prowlarr_server(server_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(require_admin)):
     """Delete a Prowlarr server"""
     db_server = db.query(ProwlarrServer).filter(ProwlarrServer.id == server_id).first()
     if not db_server:
@@ -295,7 +299,7 @@ def delete_prowlarr_server(server_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/prowlarr/test")
-def test_prowlarr_connection(request: ProwlarrTestRequest):
+def test_prowlarr_connection(request: ProwlarrTestRequest, current_user: models.User = Depends(require_admin)):
     """Test Prowlarr connection"""
     try:
         # Build URL
@@ -331,7 +335,7 @@ def test_prowlarr_connection(request: ProwlarrTestRequest):
 
 
 @router.get("/prowlarr/{server_id}/indexers")
-def get_prowlarr_indexers(server_id: int, db: Session = Depends(get_db)):
+def get_prowlarr_indexers(server_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(require_admin)):
     """Get available indexers from a Prowlarr server"""
     db_server = db.query(ProwlarrServer).filter(ProwlarrServer.id == server_id).first()
     if not db_server:
@@ -369,7 +373,7 @@ def get_prowlarr_indexers(server_id: int, db: Session = Depends(get_db)):
 
 # Download Client endpoints
 @router.get("/download-clients", response_model=List[DownloadClientResponse])
-def get_download_clients(db: Session = Depends(get_db)):
+def get_download_clients(db: Session = Depends(get_db), current_user: models.User = Depends(require_admin)):
     """Get all download clients"""
     clients = db.query(DownloadClient).order_by(DownloadClient.priority.desc()).all()
 
@@ -386,7 +390,8 @@ def get_download_clients(db: Session = Depends(get_db)):
 @router.post("/download-clients", response_model=DownloadClientResponse)
 def create_download_client(
     client: DownloadClientCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
 ):
     """Create a new download client"""
     # Check if name exists
@@ -417,7 +422,8 @@ def create_download_client(
 def update_download_client(
     client_id: int,
     client: DownloadClientUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
 ):
     """Update a download client"""
     db_client = db.query(DownloadClient).filter(DownloadClient.id == client_id).first()
@@ -457,7 +463,7 @@ def update_download_client(
 
 
 @router.delete("/download-clients/{client_id}")
-def delete_download_client(client_id: int, db: Session = Depends(get_db)):
+def delete_download_client(client_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(require_admin)):
     """Delete a download client"""
     db_client = db.query(DownloadClient).filter(DownloadClient.id == client_id).first()
     if not db_client:
@@ -471,7 +477,7 @@ def delete_download_client(client_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/download-clients/test")
-def test_download_client(request: DownloadClientTestRequest):
+def test_download_client(request: DownloadClientTestRequest, current_user: models.User = Depends(require_admin)):
     """Test download client connection"""
     try:
         if request.protocol == "torrent":

@@ -21,6 +21,7 @@ class UserResponse(UserBase):
     id: int
     is_active: bool
     is_admin: bool
+    has_password: bool = True
     can_request_ebook: Optional[bool] = True
     can_request_audiobook: Optional[bool] = True
     can_download: Optional[bool] = True
@@ -44,6 +45,9 @@ class UserResponse(UserBase):
                 data['auto_approve_ebooks'] = True
             if data.get('auto_approve_audiobooks') is None:
                 data['auto_approve_audiobooks'] = True
+            data['has_password'] = bool(data.get('hashed_password'))
+        else:
+            data.has_password = bool(getattr(data, 'hashed_password', None))
         return data
 
     class Config:

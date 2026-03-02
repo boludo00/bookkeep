@@ -48,7 +48,13 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
             detail="Invalid username or password"
         )
 
-    # Verify password
+    if not user.hashed_password:
+        logger.warning("login_failed_oidc_only_user", username=request.username)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="This account uses SSO. Please sign in with the SSO button."
+        )
+
     if not verify_password(request.password, user.hashed_password):
         logger.warning("login_failed_invalid_password", username=request.username)
         raise HTTPException(

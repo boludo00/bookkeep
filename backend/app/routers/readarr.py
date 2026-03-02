@@ -5,6 +5,7 @@ from typing import List, Optional, Dict, Any
 import httpx
 import structlog
 from app import database, models, schemas
+from app.auth import require_admin
 from app.services.readarr_service import get_readarr_availability_map
 from app.services.readarr_service import (
     ReadarrClient,
@@ -112,7 +113,8 @@ async def test_readarr_connection(
 @router.post("/test-connection", response_model=schemas.ReadarrTestConnectionResponse)
 async def test_connection(
     request: schemas.ReadarrTestConnectionRequest,
-    db: Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(require_admin),
 ):
     """Test Readarr connection and fetch available resources"""
     return await test_readarr_connection(
@@ -124,7 +126,10 @@ async def test_connection(
     )
 
 @router.get("/", response_model=List[schemas.ReadarrServerResponse])
-def get_readarr_servers(db: Session = Depends(database.get_db)):
+def get_readarr_servers(
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(require_admin),
+):
     """Get all Readarr servers"""
     servers = db.query(models.ReadarrServer).all()
     return servers
@@ -264,7 +269,11 @@ async def check_books_availability_batch(
 
 
 @router.get("/{server_id}", response_model=schemas.ReadarrServerResponse)
-def get_readarr_server(server_id: int, db: Session = Depends(database.get_db)):
+def get_readarr_server(
+    server_id: int,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(require_admin),
+):
     """Get a specific Readarr server"""
     server = db.query(models.ReadarrServer).filter(models.ReadarrServer.id == server_id).first()
     if not server:
@@ -277,7 +286,8 @@ def get_readarr_server(server_id: int, db: Session = Depends(database.get_db)):
 @router.post("/", response_model=schemas.ReadarrServerResponse, status_code=status.HTTP_201_CREATED)
 def create_readarr_server(
     server: schemas.ReadarrServerCreate,
-    db: Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(require_admin),
 ):
     """Create a new Readarr server"""
     # If this is set as default, unset other defaults of the same type
@@ -299,7 +309,8 @@ def create_readarr_server(
 def update_readarr_server(
     server_id: int,
     server_update: schemas.ReadarrServerUpdate,
-    db: Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(require_admin),
 ):
     """Update a Readarr server"""
     db_server = db.query(models.ReadarrServer).filter(models.ReadarrServer.id == server_id).first()
@@ -329,7 +340,11 @@ def update_readarr_server(
     return db_server
 
 @router.delete("/{server_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_readarr_server(server_id: int, db: Session = Depends(database.get_db)):
+def delete_readarr_server(
+    server_id: int,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(require_admin),
+):
     """Delete a Readarr server"""
     db_server = db.query(models.ReadarrServer).filter(models.ReadarrServer.id == server_id).first()
     if not db_server:

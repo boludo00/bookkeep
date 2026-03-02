@@ -48,6 +48,17 @@ services:
       - redis_data:/data
     restart: unless-stopped
 
+  # Optional: FlareSolverr for Cloudflare bypass (used by direct downloads)
+  # Uncomment to enable. Set the URL in Direct Download Settings to http://flaresolverr:8191
+  # flaresolverr:
+  #   image: ghcr.io/flaresolverr/flaresolverr:latest
+  #   container_name: book-hound-flaresolverr
+  #   environment:
+  #     LOG_LEVEL: info
+  #   ports:
+  #     - "8191:8191"
+  #   restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:

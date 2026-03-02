@@ -394,7 +394,7 @@ class TestQualitySorting:
         # Return releases with different quality indicators
         mock_prowlarr_source.client.search_with_retry.return_value = [
             {
-                "title": "Book Low Quality.pdf",
+                "title": "Author - The Great Gatsby.pdf",
                 "downloadUrl": "http://download/1",
                 "size": 100000,  # Very small
                 "protocol": "torrent",
@@ -402,7 +402,7 @@ class TestQualitySorting:
                 "categories": [],
             },
             {
-                "title": "Book High Quality [EPUB]",
+                "title": "Author - The Great Gatsby [EPUB]",
                 "downloadUrl": "http://download/2",
                 "size": 5242880,  # 5 MB - good size
                 "protocol": "torrent",
@@ -410,7 +410,7 @@ class TestQualitySorting:
                 "categories": [],
             },
             {
-                "title": "Book Medium Quality [MOBI]",
+                "title": "Author - The Great Gatsby [MOBI]",
                 "downloadUrl": "http://download/3",
                 "size": 3145728,  # 3 MB
                 "protocol": "torrent",
@@ -420,7 +420,7 @@ class TestQualitySorting:
         ]
 
         results = mock_prowlarr_source.search(
-            title="Book",
+            title="The Great Gatsby",
             format_type="ebook"
         )
 
@@ -429,8 +429,8 @@ class TestQualitySorting:
         assert results[0].quality_score >= results[1].quality_score
         assert results[1].quality_score >= results[2].quality_score
 
-        # High quality should be first (EPUB, good size, many seeders)
-        assert "High Quality" in results[0].title
+        # EPUB should rank highest (preferred format, good size, many seeders)
+        assert results[0].format == "epub"
 
 
 class TestEdgeCases:
@@ -568,3 +568,166 @@ class TestIntegrationScenarios:
         assert results[0].format == "m4b"
         assert results[0].metadata["is_audiobook"] is True
         assert results[0].size_bytes == 524288000
+
+
+class TestTitleMatches:
+    """Test title matching logic for release filtering"""
+
+    # --- Short title tests (1-2 significant words) ---
+
+    def test_short_title_rejects_false_positive(self, mock_prowlarr_source):
+        """'It' should NOT match 'You Like It Darker by Stephen King'"""
+        assert mock_prowlarr_source._title_matches(
+            "You Like It Darker by Stephen King", "It"
+        ) is False
+
+    def test_short_title_exact_segment_after_dash(self, mock_prowlarr_source):
+        """'It' should match 'Stephen King - It [EPUB]'"""
+        assert mock_prowlarr_source._title_matches(
+            "Stephen King - It [EPUB]", "It"
+        ) is True
+
+    def test_short_title_exact_segment_before_by(self, mock_prowlarr_source):
+        """'It' should match 'It by Stephen King [EPUB]'"""
+        assert mock_prowlarr_source._title_matches(
+            "It by Stephen King [EPUB]", "It"
+        ) is True
+
+    def test_short_title_direct_containment(self, mock_prowlarr_source):
+        """Direct containment still works for short titles"""
+        assert mock_prowlarr_source._title_matches(
+            "It - Stephen King", "It"
+        ) is True
+
+    def test_short_title_dune(self, mock_prowlarr_source):
+        """'Dune' should match 'Frank Herbert - Dune [EPUB]'"""
+        assert mock_prowlarr_source._title_matches(
+            "Frank Herbert - Dune [EPUB]", "Dune"
+        ) is True
+
+    def test_short_title_dune_rejects_messiah(self, mock_prowlarr_source):
+        """'Dune' should NOT match 'Dune Messiah by Frank Herbert'"""
+        assert mock_prowlarr_source._title_matches(
+            "Dune Messiah by Frank Herbert", "Dune"
+        ) is False
+
+    def test_short_title_two_words(self, mock_prowlarr_source):
+        """Two-word title 'Dark Matter' should match correctly"""
+        assert mock_prowlarr_source._title_matches(
+            "Blake Crouch - Dark Matter [EPUB]", "Dark Matter"
+        ) is True
+
+    # --- Long title tests (3+ significant words) ---
+
+    def test_long_title_direct_containment(self, mock_prowlarr_source):
+        """Full title substring match"""
+        assert mock_prowlarr_source._title_matches(
+            "The Great Gatsby F Scott Fitzgerald [EPUB]", "The Great Gatsby"
+        ) is True
+
+    def test_long_title_subtitle_match(self, mock_prowlarr_source):
+        """Subtitle 'The Final Empire' should match in release"""
+        assert mock_prowlarr_source._title_matches(
+            "Brandon Sanderson - The Final Empire [EPUB]",
+            "Mistborn: The Final Empire"
+        ) is True
+
+    def test_long_title_word_overlap(self, mock_prowlarr_source):
+        """Word overlap >= 60% should match"""
+        assert mock_prowlarr_source._title_matches(
+            "Gatsby Great American Novel", "The Great Gatsby"
+        ) is True
+
+    def test_long_title_insufficient_overlap(self, mock_prowlarr_source):
+        """Word overlap < 60% should NOT match"""
+        assert mock_prowlarr_source._title_matches(
+            "Completely Different Book Title", "The Great Gatsby"
+        ) is False
+
+    # --- Empty/None edge cases ---
+
+    def test_empty_expected_title(self, mock_prowlarr_source):
+        """Empty expected title should always match (no filter)"""
+        assert mock_prowlarr_source._title_matches(
+            "Any Release Title", ""
+        ) is True
+
+    def test_none_expected_title_in_convert(self, mock_prowlarr_source):
+        """No expected_title should skip title validation"""
+        prowlarr_result = {
+            "title": "Any Book [EPUB]",
+            "downloadUrl": "http://download/1",
+            "size": 2048000,
+            "protocol": "torrent",
+            "categories": [],
+        }
+        release = mock_prowlarr_source._convert_to_release(
+            prowlarr_result, "ebook", expected_title=None
+        )
+        assert release is not None
+
+    # --- Integration: _convert_to_release rejects wrong title ---
+
+    def test_convert_rejects_wrong_title(self, mock_prowlarr_source):
+        """_convert_to_release should reject releases with wrong title"""
+        prowlarr_result = {
+            "title": "You Like It Darker by Stephen King [EPUB]",
+            "downloadUrl": "http://download/1",
+            "size": 2048000,
+            "protocol": "torrent",
+            "categories": [{"id": 7000, "name": "Books/Ebook"}],
+        }
+        release = mock_prowlarr_source._convert_to_release(
+            prowlarr_result, "ebook",
+            expected_author="Stephen King",
+            expected_title="It"
+        )
+        assert release is None
+
+    def test_convert_accepts_correct_title(self, mock_prowlarr_source):
+        """_convert_to_release should accept releases with correct title"""
+        prowlarr_result = {
+            "title": "Stephen King - It [EPUB]",
+            "downloadUrl": "http://download/1",
+            "size": 2048000,
+            "protocol": "torrent",
+            "categories": [{"id": 7000, "name": "Books/Ebook"}],
+        }
+        release = mock_prowlarr_source._convert_to_release(
+            prowlarr_result, "ebook",
+            expected_author="Stephen King",
+            expected_title="It"
+        )
+        assert release is not None
+        assert release.title == "Stephen King - It [EPUB]"
+
+    # --- Integration: search() passes title through ---
+
+    def test_search_filters_wrong_titles(self, mock_prowlarr_source):
+        """search() should filter out releases that don't match the title"""
+        mock_prowlarr_source.client.search_with_retry.return_value = [
+            {
+                "title": "Stephen King - It [EPUB]",
+                "downloadUrl": "http://download/1",
+                "size": 2048000,
+                "protocol": "torrent",
+                "categories": [{"id": 7000, "name": "Books/Ebook"}],
+            },
+            {
+                "title": "You Like It Darker by Stephen King [EPUB]",
+                "downloadUrl": "http://download/2",
+                "size": 3048000,
+                "protocol": "torrent",
+                "categories": [{"id": 7000, "name": "Books/Ebook"}],
+            },
+        ]
+
+        results = mock_prowlarr_source.search(
+            title="It",
+            author="Stephen King",
+            format_type="ebook"
+        )
+
+        # Only the correct title should survive
+        assert len(results) == 1
+        assert "Stephen King - It" in results[0].title

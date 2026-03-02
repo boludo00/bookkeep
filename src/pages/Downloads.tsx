@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { usePageVisibility } from '@/hooks/usePageVisibility';
-import { Download, RefreshCw, Clock, CheckCircle, XCircle, Pause, PlayCircle, FolderInput, Trash2, AlertCircle, Loader2 } from 'lucide-react';
+import { Download, RefreshCw, Clock, CheckCircle, XCircle, Pause, FolderInput, Trash2, AlertCircle, Loader2, RotateCcw, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -21,6 +22,7 @@ import {
 import { toast } from 'sonner';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { downloadsApi } from '@/lib/api';
+import { DownloadLogPanel } from '@/components/downloads/DownloadLogPanel';
 
 interface DownloadTask {
   id: number;
@@ -245,6 +247,30 @@ export default function Downloads() {
       toast.error('Import failed', {
         description: err.message,
       });
+    },
+  });
+
+  // Retry a failed download mutation
+  const retryMutation = useMutation({
+    mutationFn: async (task: DownloadTask) => {
+      // Delete the old error task first so it doesn't clog the list
+      await downloadsApi.deleteTask(task.id);
+      // Re-queue the exact same download
+      return downloadsApi.downloadRelease({
+        book_id: task.book_id,
+        format_type: task.format,
+        download_url: task.download_url,
+        protocol: task.protocol,
+        release_title: task.release_title,
+        indexer: task.source || undefined,
+      });
+    },
+    onSuccess: (data) => {
+      toast.success('Download retrying', { description: data.message });
+      queryClient.invalidateQueries({ queryKey: ['download-tasks'] });
+    },
+    onError: (err: Error) => {
+      toast.error('Retry failed', { description: err.message });
     },
   });
 
@@ -499,9 +525,13 @@ export default function Downloads() {
                       <div className="truncate" title={task.release_title}>
                         {task.release_title}
                       </div>
-                      <div className="text-xs text-muted-foreground mt-1">
-                        Book ID: {task.book_id}
-                      </div>
+                      <Link
+                        to={`/book/${task.book_id}`}
+                        className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors mt-1"
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                        View Book
+                      </Link>
                     </TableCell>
                     <TableCell>
                       <Badge variant="outline" className="border-border text-foreground">
@@ -509,10 +539,46 @@ export default function Downloads() {
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      <Badge variant={getStateBadgeVariant(task.state)} className="gap-1">
-                        {getStateIcon(task.state)}
-                        {getDetailedStatus(task.state, task.client_state)}
-                      </Badge>
+                      <div className="flex flex-col gap-1">
+                        {task.state === 'error' ? (
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div>
+                                  <Badge variant={getStateBadgeVariant(task.state)} className="gap-1 cursor-help">
+                                    {getStateIcon(task.state)}
+                                    {getDetailedStatus(task.state, task.client_state)}
+                                  </Badge>
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent className="max-w-sm bg-popover border-border">
+                                <p className="text-xs">
+                                  {task.message?.includes('403') || task.message?.toLowerCase().includes('sources failed')
+                                    ? 'Direct download sources blocked. Try torrent/usenet instead.'
+                                    : task.message?.toLowerCase().includes('no path')
+                                    ? 'Configure download path in Settings'
+                                    : 'Check download log for details'}
+                                </p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        ) : (
+                          <Badge variant={getStateBadgeVariant(task.state)} className="gap-1">
+                            {getStateIcon(task.state)}
+                            {getDetailedStatus(task.state, task.client_state)}
+                          </Badge>
+                        )}
+                        {(task.state === 'downloading' || task.state === 'queued') && task.protocol === 'direct' && task.message && (
+                          <span className="text-xs text-primary font-medium truncate max-w-[180px]" title={task.message}>
+                            {task.message}
+                          </span>
+                        )}
+                        {task.state === 'error' && task.protocol === 'direct' && task.message && (
+                          <span className="text-xs text-destructive font-medium truncate max-w-[180px]" title={task.message}>
+                            {task.message}
+                          </span>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell>
                       {task.import_status === 'failed' && task.import_message ? (
@@ -557,7 +623,7 @@ export default function Downloads() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <div className="w-full max-w-[120px]">
+                      <div className="w-full max-w-[150px]">
                         <div className="flex items-center justify-between mb-1">
                           <span className="text-xs text-muted-foreground">
                             {task.progress.toFixed(0)}%
@@ -582,6 +648,33 @@ export default function Downloads() {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
+                        {/* Show log button for direct downloads */}
+                        <DownloadLogPanel taskId={task.id} protocol={task.protocol} />
+                        {/* Retry button for failed downloads */}
+                        {task.state === 'error' && (
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => retryMutation.mutate(task)}
+                                  disabled={retryMutation.isPending}
+                                  className="border-amber-500/50 text-amber-400 hover:bg-amber-500/10 hover:border-amber-500"
+                                >
+                                  {retryMutation.isPending ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <RotateCcw className="h-4 w-4" />
+                                  )}
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent className="bg-popover border-border">
+                                <p className="text-xs">Retry download</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        )}
                         {/* Show import button when:
                             1. Download is complete/seeding
                             2. Import hasn't succeeded

@@ -225,7 +225,8 @@ def get_requests(
 @router.get("/by-book/{book_id}")
 async def get_requests_for_book(
     book_id: int,
-    db: Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user),
 ):
     """Get all non-denied requests for a book by local book_id (to show which formats are already requested)"""
     requests = db.query(models.BookRequest).filter(
@@ -245,7 +246,8 @@ async def get_requests_for_book(
 @router.get("/by-hardcover/{hardcover_id}")
 async def get_requests_for_hardcover_book(
     hardcover_id: int,
-    db: Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user),
 ):
     """Get all non-denied requests for a book by hardcover_id (to show which formats are already requested)"""
     cache_key = make_cache_key("requests_by_hardcover", hardcover_id=hardcover_id)
@@ -289,6 +291,7 @@ async def get_requests_for_hardcover_book(
 async def get_requests_for_hardcover_batch(
     payload: schemas.ReadarrAvailabilityBatchRequest,
     db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user),
 ):
     """Get request status for multiple hardcover IDs."""
     hardcover_ids = list({int(book_id) for book_id in payload.hardcover_ids if book_id is not None})
@@ -686,7 +689,11 @@ async def clear_series_requests(
 
 
 @router.get("/{request_id}", response_model=schemas.BookRequestResponse)
-def get_request(request_id: int, db: Session = Depends(database.get_db)):
+def get_request(
+    request_id: int,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user),
+):
     from sqlalchemy.orm import joinedload
     
     db_request = db.query(models.BookRequest).options(
@@ -802,12 +809,21 @@ async def update_request(
     return db_request
 
 @router.delete("/{request_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_request(request_id: int, db: Session = Depends(database.get_db)):
+async def delete_request(
+    request_id: int,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(get_current_user),
+):
     db_request = db.query(models.BookRequest).filter(models.BookRequest.id == request_id).first()
     if not db_request:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Request not found"
+        )
+    if db_request.user_id != current_user.id and not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to delete this request"
         )
     hardcover_id = db_request.book.hardcover_id if db_request.book else None
     db.delete(db_request)

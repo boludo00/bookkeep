@@ -14,8 +14,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 
 export default function Discover() {
   const { data: tokenStatus, isLoading: tokenLoading } = useQuery({
-    queryKey: ['hardcover-token-status'],
-    queryFn: () => settingsApi.getHardcoverToken(),
+    queryKey: ['hardcover-token-check'],
+    queryFn: () => settingsApi.checkHardcoverToken(),
   });
 
   const { data: requests = [] } = useQuery({

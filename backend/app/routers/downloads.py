@@ -12,9 +12,12 @@ import hashlib
 import json
 
 from ..database import get_db
-from ..models import Book, ProwlarrServer, DownloadClient, DownloadTask, AppSettings
+from ..models import Book, ProwlarrServer, DownloadClient, DownloadTask, AppSettings, DirectDownloadSettings
+from app.auth import require_admin, get_current_user
+from app import models
 from ..downloads.prowlarr import ProwlarrSource
 from ..downloads import DownloadOrchestrator
+from ..downloads.handlers.direct import get_download_log
 
 router = APIRouter()
 logger = structlog.get_logger()
@@ -89,7 +92,7 @@ class ReleaseInfo(BaseModel):
     """Information about a search result release"""
     title: str
     download_url: str
-    protocol: str  # "torrent" or "usenet"
+    protocol: str  # "torrent", "usenet", or "direct"
     indexer: str
     size_bytes: int
     seeders: Optional[int] = None
@@ -113,7 +116,7 @@ class DownloadRequest(BaseModel):
     book_id: int
     format_type: str  # "ebook" or "audiobook"
     download_url: str
-    protocol: str  # "torrent" or "usenet"
+    protocol: str  # "torrent", "usenet", or "direct"
     release_title: str
     indexer: str
     size_bytes: int
@@ -130,10 +133,17 @@ class DownloadResponse(BaseModel):
 async def search_releases(
     book_id: int,
     format_type: str,  # "ebook" or "audiobook"
+    source_filter: Optional[str] = None,  # "prowlarr", "direct", or None for all
+    current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    Search for releases of a book via Prowlarr.
+    Search for releases of a book.
+
+    Args:
+        book_id: Database ID of the book
+        format_type: "ebook" or "audiobook"
+        source_filter: Filter by source - "prowlarr", "direct", or None for all
 
     Returns a list of available releases with quality scores and details.
     """
@@ -142,114 +152,150 @@ async def search_releases(
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
 
-    # Get default Prowlarr server
-    prowlarr_server = db.query(ProwlarrServer).filter(
-        ProwlarrServer.enabled == True,
-        ProwlarrServer.is_default == True
-    ).first()
+    releases = []
 
-    if not prowlarr_server:
-        # Try to get any enabled server
+    # Check if direct downloads are enabled
+    direct_settings = db.query(DirectDownloadSettings).first()
+    direct_enabled = direct_settings and direct_settings.enabled
+
+    # Determine which sources to search
+    search_prowlarr = source_filter is None or source_filter == "prowlarr"
+    search_direct = (source_filter is None or source_filter == "direct") and direct_enabled
+
+    # Search Prowlarr if requested
+    if search_prowlarr:
+        # Get default Prowlarr server
         prowlarr_server = db.query(ProwlarrServer).filter(
-            ProwlarrServer.enabled == True
+            ProwlarrServer.enabled == True,
+            ProwlarrServer.is_default == True
         ).first()
 
-    if not prowlarr_server:
-        raise HTTPException(
-            status_code=404,
-            detail="No enabled Prowlarr server configured"
-        )
+        if not prowlarr_server:
+            # Try to get any enabled server
+            prowlarr_server = db.query(ProwlarrServer).filter(
+                ProwlarrServer.enabled == True
+            ).first()
 
-    try:
-        # Build Prowlarr URL from server config
-        protocol = "https" if prowlarr_server.use_ssl else "http"
-        base_url = f"{protocol}://{prowlarr_server.host}:{prowlarr_server.port}"
-        if prowlarr_server.url_base:
-            base_url = f"{base_url}/{prowlarr_server.url_base.strip('/')}"
-
-        # Parse indexer IDs from JSON if configured
-        indexer_ids = None
-        if prowlarr_server.indexer_ids_json:
+        if prowlarr_server:
             try:
-                indexer_ids = json.loads(prowlarr_server.indexer_ids_json)
-            except (json.JSONDecodeError, TypeError):
-                pass
+                # Build Prowlarr URL from server config
+                protocol = "https" if prowlarr_server.use_ssl else "http"
+                base_url = f"{protocol}://{prowlarr_server.host}:{prowlarr_server.port}"
+                if prowlarr_server.url_base:
+                    base_url = f"{base_url}/{prowlarr_server.url_base.strip('/')}"
 
-        # Initialize Prowlarr source with database config
-        source = ProwlarrSource(
-            base_url=base_url,
-            api_key=prowlarr_server.api_key,
-            indexer_ids=indexer_ids
-        )
+                # Parse indexer IDs from JSON if configured
+                indexer_ids = None
+                if prowlarr_server.indexer_ids_json:
+                    try:
+                        indexer_ids = json.loads(prowlarr_server.indexer_ids_json)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
 
-        # Search for releases
-        releases = source.search(
-            title=book.title,
-            author=book.author,
-            isbn=book.isbn,
-            format_type=format_type
-        )
+                # Initialize Prowlarr source with database config
+                prowlarr_source = ProwlarrSource(
+                    base_url=base_url,
+                    api_key=prowlarr_server.api_key,
+                    indexer_ids=indexer_ids
+                )
 
-        # Filter releases to only include protocols with configured clients
-        available_protocols = db.query(DownloadClient.protocol).filter(
-            DownloadClient.enabled == True
-        ).distinct().all()
-        available_protocols = [p.protocol for p in available_protocols if p.protocol]
+                # Search for releases
+                prowlarr_releases = prowlarr_source.search(
+                    title=book.title,
+                    author=book.author,
+                    isbn=book.isbn,
+                    format_type=format_type
+                )
 
-        if available_protocols:
-            releases = [r for r in releases if r.protocol in available_protocols]
+                # Filter releases to only include protocols with configured clients
+                available_protocols = db.query(DownloadClient.protocol).filter(
+                    DownloadClient.enabled == True
+                ).distinct().all()
+                available_protocols = [p.protocol for p in available_protocols if p.protocol]
 
-        logger.debug(
-            "search_filtered_by_protocol",
-            available_protocols=available_protocols,
-            releases_after_filter=len(releases)
-        )
+                if available_protocols:
+                    prowlarr_releases = [r for r in prowlarr_releases if r.protocol in available_protocols]
 
-        # Convert to response format and check if already downloaded
-        release_info = []
-        for r in releases:
-            release_hash = compute_release_hash(r.download_url)
-            already_downloaded = check_if_already_downloaded(db, book_id, release_hash)
+                releases.extend(prowlarr_releases)
+                logger.info(
+                    "prowlarr_search_completed",
+                    book_id=book_id,
+                    prowlarr_releases=len(prowlarr_releases)
+                )
+            except Exception as e:
+                logger.warning("prowlarr_search_failed", error=str(e))
+                # If only searching Prowlarr and it fails, raise error
+                if source_filter == "prowlarr":
+                    raise HTTPException(status_code=500, detail=f"Prowlarr search failed: {str(e)}")
+        elif source_filter == "prowlarr":
+            raise HTTPException(status_code=404, detail="No enabled Prowlarr server configured")
 
-            release_info.append(ReleaseInfo(
-                title=r.title,
-                download_url=r.download_url,
-                protocol=r.protocol,
-                indexer=r.indexer,
-                size_bytes=r.size_bytes,
-                seeders=r.seeders,
-                format=r.format,
-                language=r.language,
-                quality_score=r.quality_score,
-                published_date=r.publish_date.isoformat() if r.publish_date else None,
-                already_downloaded=already_downloaded,
-                info_url=r.info_url
-            ))
+    # Search direct download sources if requested and enabled
+    if search_direct:
+        try:
+            from ..downloads.direct.source import DirectDownloadSource
+            direct_source = DirectDownloadSource(db_session=db)
+            direct_releases = direct_source.search(
+                title=book.title,
+                author=book.author,
+                isbn=book.isbn,
+                format_type=format_type
+            )
+            releases.extend(direct_releases)
+            logger.info(
+                "direct_search_completed",
+                book_id=book_id,
+                direct_releases=len(direct_releases)
+            )
+        except Exception as e:
+            logger.warning("direct_search_failed", error=str(e))
+            # If only searching direct and it fails, raise error
+            if source_filter == "direct":
+                raise HTTPException(status_code=500, detail=f"Direct search failed: {str(e)}")
 
-        logger.info(
-            "search_completed",
-            book_id=book_id,
-            format_type=format_type,
-            releases_found=len(release_info)
-        )
+    # Sort combined results by quality
+    releases.sort(key=lambda r: r.quality_score, reverse=True)
 
-        return SearchResponse(
-            book_id=book_id,
-            releases=release_info,
-            total=len(release_info)
-        )
+    # Convert to response format and check if already downloaded
+    release_info = []
+    for r in releases:
+        release_hash = compute_release_hash(r.download_url)
+        already_downloaded = check_if_already_downloaded(db, book_id, release_hash)
 
-    except Exception as e:
-        logger.error("search_failed", book_id=book_id, error=str(e))
-        raise HTTPException(
-            status_code=500,
-            detail=f"Search failed: {str(e)}"
-        )
+        release_info.append(ReleaseInfo(
+            title=r.title,
+            download_url=r.download_url,
+            protocol=r.protocol,
+            indexer=r.indexer,
+            size_bytes=r.size_bytes,
+            seeders=r.seeders,
+            format=r.format,
+            language=r.language,
+            quality_score=r.quality_score,
+            published_date=r.publish_date.isoformat() if r.publish_date else None,
+            already_downloaded=already_downloaded,
+            info_url=r.info_url
+        ))
+
+    logger.info(
+        "search_completed",
+        book_id=book_id,
+        format_type=format_type,
+        source_filter=source_filter,
+        releases_found=len(release_info)
+    )
+
+    return SearchResponse(
+        book_id=book_id,
+        releases=release_info,
+        total=len(release_info)
+    )
 
 
 @router.post("/download", response_model=DownloadResponse)
 async def start_download(
     request: DownloadRequest,
+    current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -339,6 +385,7 @@ async def start_download(
 async def auto_download(
     book_id: int,
     format_type: str,  # "ebook" or "audiobook"
+    current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -404,6 +451,7 @@ async def get_download_tasks(
     skip: int = 0,
     limit: int = 100,
     state: Optional[str] = None,
+    current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -449,9 +497,47 @@ async def get_download_tasks(
     return result
 
 
+@router.get("/tasks/{task_id}/log")
+async def get_download_task_log(
+    task_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get detailed download log for a direct download task.
+
+    Returns information about each download source attempted,
+    including success/failure status and error messages.
+
+    This is useful for debugging failed downloads and understanding
+    which sources were tried.
+    """
+    # Verify task exists
+    task = db.query(DownloadTask).filter(DownloadTask.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Download task not found")
+
+    # Get the download log
+    download_log = get_download_log(task_id)
+
+    if not download_log:
+        # No log available - return basic info
+        return {
+            "task_id": task_id,
+            "started_at": task.started_at.isoformat() if task.started_at else None,
+            "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+            "final_result": task.state,
+            "attempts": [],
+            "message": "No detailed log available for this task"
+        }
+
+    return download_log.to_dict()
+
+
 @router.post("/import/{task_id}")
 async def import_download(
     task_id: int,
+    current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -547,6 +633,7 @@ async def import_download(
 @router.delete("/task/{task_id}")
 async def delete_task(
     task_id: int,
+    current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -588,6 +675,7 @@ async def delete_task(
 
 @router.delete("/tasks/clear")
 async def clear_tasks(
+    current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """

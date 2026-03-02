@@ -433,6 +433,7 @@ export interface ApiUser {
   full_name?: string;
   is_active: boolean;
   is_admin: boolean;
+  has_password: boolean;
   can_request_ebook: boolean;
   can_request_audiobook: boolean;
   can_download: boolean;
@@ -448,6 +449,21 @@ export interface LoginResponse {
   refresh_token: string;
   token_type: string;
   expires_in: number;
+}
+
+export interface OidcSettingField {
+  value: string | null;
+  source: string;
+}
+
+export interface OidcSettingsResponse {
+  enabled: boolean;
+  oidc_issuer_url: OidcSettingField;
+  oidc_client_id: OidcSettingField;
+  oidc_client_secret: OidcSettingField;
+  oidc_redirect_uri: OidcSettingField;
+  oidc_auto_register: OidcSettingField;
+  oidc_button_text: OidcSettingField;
 }
 
 // Auth API endpoints
@@ -480,6 +496,14 @@ export const authApi = {
 
   logout: () => {
     clearTokens();
+  },
+
+  getOidcConfig: async (): Promise<{ enabled: boolean; button_text: string; logout_url: string | null }> => {
+    const response = await fetch(`${API_BASE_URL}/api/auth/oidc/config`);
+    if (!response.ok) {
+      return { enabled: false, button_text: 'Sign in with SSO', logout_url: null };
+    }
+    return response.json();
   },
 };
 
@@ -523,6 +547,9 @@ export const usersApi = {
 
 // Settings API endpoints
 export const settingsApi = {
+  checkHardcoverToken: () =>
+    apiRequest<{ has_hardcover_token: boolean }>('/api/settings/hardcover-token/check'),
+
   getHardcoverToken: () =>
     apiRequest<{ hardcover_api_token: string | null; hardcover_api_token_source: string; has_hardcover_token: boolean }>('/api/settings/hardcover-token'),
 
@@ -565,6 +592,20 @@ export const settingsApi = {
       directories: Array<{ name: string; path: string }>;
       error: string | null;
     }>(`/api/settings/browse-directories?path=${encodeURIComponent(path)}`),
+
+  getOidcSettings: () =>
+    apiRequest<OidcSettingsResponse>('/api/settings/oidc'),
+
+  updateOidcSettings: (settings: Record<string, string>) =>
+    apiRequest<{ message: string }>('/api/settings/oidc', {
+      method: 'PUT',
+      body: JSON.stringify(settings),
+    }),
+
+  testOidcConnection: () =>
+    apiRequest<{ status: string; issuer: string; authorization_endpoint: string; token_endpoint: string; userinfo_endpoint: string }>('/api/settings/oidc/test', {
+      method: 'POST',
+    }),
 };
 
 // Readarr API endpoints
@@ -955,14 +996,39 @@ export interface DownloadTask {
   created_at: string | null;
   started_at: string | null;
   completed_at: string | null;
+  message?: string;
+}
+
+export interface DownloadAttempt {
+  source_name: string;
+  source_type: string;
+  url: string;
+  started_at: string;
+  ended_at: string | null;
+  success: boolean;
+  error: string | null;
+  bytes_downloaded: number;
+}
+
+export interface DownloadLog {
+  task_id: number;
+  started_at: string | null;
+  completed_at: string | null;
+  final_result: string | null;
+  attempts: DownloadAttempt[];
+  message?: string;
 }
 
 export const downloadsApi = {
-  // Search for releases via Prowlarr
-  searchReleases: (bookId: number, formatType: 'ebook' | 'audiobook') =>
-    apiRequest<SearchResponse>(`/api/downloads/search/${bookId}?format_type=${formatType}`, {
-      method: 'POST',
-    }),
+  // Search for releases
+  // source: 'prowlarr' | 'direct' | undefined (undefined = all sources)
+  searchReleases: (bookId: number, formatType: 'ebook' | 'audiobook', source?: 'prowlarr' | 'direct') => {
+    let url = `/api/downloads/search/${bookId}?format_type=${formatType}`;
+    if (source) {
+      url += `&source_filter=${source}`;
+    }
+    return apiRequest<SearchResponse>(url, { method: 'POST' });
+  },
 
   // Manually download a specific release
   downloadRelease: (request: {
@@ -971,8 +1037,8 @@ export const downloadsApi = {
     download_url: string;
     protocol: string;
     release_title: string;
-    indexer: string;
-    size_bytes: number;
+    indexer?: string;
+    size_bytes?: number;
   }) =>
     apiRequest<DownloadResponse>('/api/downloads/download', {
       method: 'POST',
@@ -995,6 +1061,10 @@ export const downloadsApi = {
     return apiRequest<DownloadTask[]>(`/api/downloads/tasks${query ? `?${query}` : ''}`);
   },
 
+  // Get download log for a specific task (direct downloads only)
+  getTaskLog: (taskId: number) =>
+    apiRequest<DownloadLog>(`/api/downloads/tasks/${taskId}/log`),
+
   // Manually import a download to the configured destination
   importDownload: (taskId: number) =>
     apiRequest<{ success: boolean; message: string; destination_path: string }>(
@@ -1015,4 +1085,63 @@ export const downloadsApi = {
       '/api/downloads/tasks/clear',
       { method: 'DELETE' }
     ),
+};
+
+// Direct Download Settings types
+export interface DirectDownloadSettings {
+  id: number;
+  enabled: boolean;
+  annas_archive_enabled: boolean;
+  annas_archive_mirror: string | null;
+  zlibrary_enabled: boolean;
+  zlibrary_email: string | null;
+  zlibrary_password_set: boolean;
+  zlibrary_domain: string | null;
+  requests_per_minute: number;
+  flaresolverr_url: string | null;
+}
+
+export interface DirectDownloadTestResponse {
+  success: boolean;
+  providers_count: number;
+  providers_status: Record<string, boolean>;
+  message?: string;
+}
+
+// Direct Download API
+export const directDownloadApi = {
+  getSettings: () =>
+    apiRequest<DirectDownloadSettings>('/api/direct-downloads/settings'),
+
+  updateSettings: (data: {
+    enabled: boolean;
+    annas_archive_enabled: boolean;
+    annas_archive_mirror?: string;
+    zlibrary_enabled: boolean;
+    zlibrary_email?: string;
+    zlibrary_password?: string;
+    zlibrary_domain?: string;
+    requests_per_minute: number;
+    flaresolverr_url?: string | null;
+  }) =>
+    apiRequest<DirectDownloadSettings>('/api/direct-downloads/settings', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  testConnection: () =>
+    apiRequest<DirectDownloadTestResponse>('/api/direct-downloads/test', {
+      method: 'POST',
+    }),
+
+  testFlaresolverr: (url: string) =>
+    apiRequest<{ success: boolean; message: string }>('/api/direct-downloads/test-flaresolverr', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    }),
+
+  resetSettings: () =>
+    apiRequest<{ success: boolean; message: string }>('/api/direct-downloads/settings', {
+      method: 'DELETE',
+    }),
 };

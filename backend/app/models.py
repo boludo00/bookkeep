@@ -9,8 +9,9 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True, nullable=False)
     username = Column(String, unique=True, index=True, nullable=False)
-    hashed_password = Column(String, nullable=False)
+    hashed_password = Column(String, nullable=True)
     full_name = Column(String, nullable=True)
+    oidc_subject = Column(String, unique=True, nullable=True, index=True)
     is_active = Column(Boolean, default=True)
     is_admin = Column(Boolean, default=False)
     # Permission fields
@@ -306,3 +307,33 @@ class DownloadTask(Base):
 
     # Relationships
     book = relationship("Book", back_populates="download_tasks")
+
+
+class DirectDownloadSettings(Base):
+    """Direct download source configuration (Anna's Archive, Z-Library, etc.)"""
+    __tablename__ = "direct_download_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # Master toggle
+    enabled = Column(Boolean, default=False)
+
+    # Anna's Archive settings
+    annas_archive_enabled = Column(Boolean, default=True)
+    annas_archive_mirror = Column(String, nullable=True)  # Optional custom mirror URL
+
+    # Z-Library settings
+    zlibrary_enabled = Column(Boolean, default=False)
+    zlibrary_email = Column(String, nullable=True)
+    zlibrary_password = Column(String, nullable=True)  # TODO: Encrypt
+    zlibrary_domain = Column(String, nullable=True)  # Custom domain
+
+    # Rate limiting
+    requests_per_minute = Column(Integer, default=10)
+
+    # FlareSolverr for Cloudflare bypass
+    flaresolverr_url = Column(String, nullable=True)
+
+    # Metadata
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())

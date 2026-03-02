@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Star, Calendar, BookOpen, Tag, Clock, Users, Headphones, Library, ExternalLink, Trash2, Search, X } from 'lucide-react';
+import { ArrowLeft, Star, Calendar, BookOpen, Tag, Clock, Users, Headphones, Library, ExternalLink, Trash2, Search, X, Download, Globe } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -9,7 +9,7 @@ import { RequestDialog } from '@/components/books/RequestDialog';
 import { SearchReleaseDialog } from '@/components/books/SearchReleaseDialog';
 import { BookCard } from '@/components/books/BookCard';
 import { useBookDetails, useBookPrompts } from '@/hooks/useHardcoverBooks';
-import { requestsApi, booksApi } from '@/lib/api';
+import { requestsApi, booksApi, directDownloadApi } from '@/lib/api';
 import { transformHardcoverBook } from '@/lib/hardcover';
 import { toast } from 'sonner';
 import { useUser } from '@/contexts/UserContext';
@@ -21,8 +21,9 @@ export default function BookDetails() {
   const [requestOpen, setRequestOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchFormat, setSearchFormat] = useState<'ebook' | 'audiobook'>('ebook');
+  const [searchSource, setSearchSource] = useState<'prowlarr' | 'direct' | undefined>(undefined);
   const queryClient = useQueryClient();
-  const { user } = useUser();
+  const { user, isAdmin } = useUser();
   const isVisible = usePageVisibility();
   const bypassCache =
     searchParams.get('bypass_cache') === 'true' || searchParams.get('bypass_cache') === '1';
@@ -52,6 +53,14 @@ export default function BookDetails() {
     refetchInterval: hasHardcoverId && isVisible ? 30_000 : false,
     gcTime: 5 * 60 * 1000,
   });
+
+  // Check if direct downloads are enabled
+  const { data: directDownloadSettings } = useQuery({
+    queryKey: ['direct-downloads', 'settings'],
+    queryFn: () => directDownloadApi.getSettings(),
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+  });
+  const directDownloadsEnabled = directDownloadSettings?.enabled ?? false;
 
   const ebookRequestStatus = requestStatus?.ebook ?? null;
   const audiobookRequestStatus = requestStatus?.audiobook ?? null;
@@ -324,7 +333,7 @@ export default function BookDetails() {
                   <div className="group flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
                     <BookOpen className="h-4 w-4 text-emerald-400" />
                     <span className="text-sm font-medium text-emerald-400">eBook Available</span>
-                    {dbBook?.id && dbBook.ebook_available && (
+                    {isAdmin && dbBook?.id && dbBook.ebook_available && (
                       <button
                         onClick={() => {
                           if (window.confirm('Clear eBook availability? This will allow you to re-download this book.')) {
@@ -343,7 +352,7 @@ export default function BookDetails() {
                   <div className="group flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-500/10 border border-violet-500/30">
                     <Headphones className="h-4 w-4 text-violet-400" />
                     <span className="text-sm font-medium text-violet-400">Audiobook Available</span>
-                    {dbBook?.id && dbBook.audiobook_available && (
+                    {isAdmin && dbBook?.id && dbBook.audiobook_available && (
                       <button
                         onClick={() => {
                           if (window.confirm('Clear audiobook availability? This will allow you to re-download this book.')) {
@@ -362,36 +371,60 @@ export default function BookDetails() {
 
               {/* Action buttons */}
               <div className="flex flex-wrap justify-center md:justify-start gap-3 pt-4">
-                {!hasAnyRequests && hasMissingFormat && canRequestAnything && (
-                  <>
-                    <Button
-                      size="lg"
-                      onClick={() => setRequestOpen(true)}
-                      className="h-12 px-6 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-medium shadow-lg shadow-primary/25 transition-[background-color,box-shadow] duration-300 hover:shadow-primary/40"
-                    >
-                      <Clock className="h-4 w-4 mr-2" />
-                      {preferredFormat === 'ebook'
-                        ? 'Request eBook'
-                        : preferredFormat === 'audiobook'
-                          ? 'Request Audiobook'
-                          : 'Request Book'}
-                    </Button>
-                    {canDownload && (
-                      <Button
-                        size="lg"
-                        variant="outline"
-                        onClick={() => {
-                          setSearchFormat(preferredFormat || 'ebook');
-                          setSearchOpen(true);
-                        }}
-                        className="h-12 px-6 rounded-xl border-border/50 hover:bg-card hover:border-primary/30"
-                      >
-                        <Search className="h-4 w-4 mr-2" />
-                        Search Book
-                      </Button>
-                    )}
-                  </>
+                {/* Direct Download button - show when direct downloads enabled */}
+                {canDownload && hasMissingFormat && directDownloadsEnabled && (
+                  <Button
+                    size="lg"
+                    onClick={() => {
+                      setSearchFormat(preferredFormat || 'ebook');
+                      setSearchSource('direct');
+                      setSearchOpen(true);
+                    }}
+                    className="h-12 px-6 rounded-xl bg-green-600 hover:bg-green-500 text-white font-medium shadow-lg shadow-green-600/25 transition-[background-color,box-shadow] duration-300 hover:shadow-green-500/40"
+                  >
+                    <Globe className="h-4 w-4 mr-2" />
+                    Direct Download
+                  </Button>
                 )}
+
+                {/* Prowlarr Download button - show when user can download */}
+                {canDownload && hasMissingFormat && (
+                  <Button
+                    size="lg"
+                    variant={directDownloadsEnabled ? "outline" : "default"}
+                    onClick={() => {
+                      setSearchFormat(preferredFormat || 'ebook');
+                      setSearchSource('prowlarr');
+                      setSearchOpen(true);
+                    }}
+                    className={directDownloadsEnabled
+                      ? "h-12 px-6 rounded-xl border-border/50 hover:bg-card hover:border-primary/30"
+                      : "h-12 px-6 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-medium shadow-lg shadow-primary/25 transition-[background-color,box-shadow] duration-300 hover:shadow-primary/40"
+                    }
+                  >
+                    <Search className="h-4 w-4 mr-2" />
+                    Search Prowlarr
+                  </Button>
+                )}
+
+                {/* Request button - show if no downloads in progress and can request */}
+                {!hasAnyRequests && hasMissingFormat && canRequestAnything && (
+                  <Button
+                    size="lg"
+                    variant="outline"
+                    onClick={() => setRequestOpen(true)}
+                    className="h-12 px-6 rounded-xl border-border/50 hover:bg-card hover:border-primary/30"
+                  >
+                    <Clock className="h-4 w-4 mr-2" />
+                    {preferredFormat === 'ebook'
+                      ? 'Request eBook'
+                      : preferredFormat === 'audiobook'
+                        ? 'Request Audiobook'
+                        : 'Request Book'}
+                  </Button>
+                )}
+
+                {/* Processing indicator */}
                 {hasAnyRequests && !ebookAvailable && !audiobookAvailable && (
                   <div className="inline-flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-5 py-3 text-sm font-medium text-amber-400">
                     <Clock className="h-4 w-4" />
@@ -545,6 +578,7 @@ export default function BookDetails() {
           open={searchOpen}
           onOpenChange={setSearchOpen}
           formatType={searchFormat}
+          sourceFilter={searchSource}
         />
       )}
     </>

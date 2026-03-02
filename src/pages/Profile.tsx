@@ -156,14 +156,16 @@ export default function Profile() {
             </div>
 
             {/* Edit Settings Button */}
-            <Button
-              variant="outline"
-              className="gap-2"
-              onClick={() => setShowPasswordDialog(true)}
-            >
-              <KeyRound className="h-4 w-4" />
-              Change Password
-            </Button>
+            {user?.has_password !== false && (
+              <Button
+                variant="outline"
+                className="gap-2"
+                onClick={() => setShowPasswordDialog(true)}
+              >
+                <KeyRound className="h-4 w-4" />
+                Change Password
+              </Button>
+            )}
           </div>
         </div>
       </div>
