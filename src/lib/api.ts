@@ -1153,7 +1153,9 @@ export interface HardcoverSyncConfig {
   sync_list_ids: number[];
   default_format: string;
   last_synced_at: string | null;
-  has_token: boolean;
+  has_token: boolean;           // true if any token available (personal or global)
+  has_personal_token: boolean;  // true only if user set their own token
+  using_app_token: boolean;     // true if falling back to global app token
 }
 
 export interface HardcoverList {

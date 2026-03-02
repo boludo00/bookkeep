@@ -352,16 +352,48 @@ export default function Profile() {
               {/* API Token */}
               <div className="space-y-2">
                 <Label>Hardcover API Token</Label>
-                {syncConfig?.has_token ? (
+                {syncConfig?.using_app_token ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <CheckCircle className="h-4 w-4 text-emerald-500" />
+                      Using the app-wide Hardcover token
+                    </div>
+                    <div className="flex gap-2">
+                      <div className="relative flex-1">
+                        <Input
+                          type={showHardcoverToken ? 'text' : 'password'}
+                          placeholder="Override with your own token (optional)"
+                          value={hardcoverToken}
+                          onChange={(e) => setHardcoverToken(e.target.value)}
+                          className="pr-10"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowHardcoverToken(!showHardcoverToken)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        >
+                          {showHardcoverToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
+                      <Button
+                        onClick={handleSaveToken}
+                        disabled={!hardcoverToken.trim() || updateSyncMutation.isPending}
+                        variant="outline"
+                      >
+                        Save
+                      </Button>
+                    </div>
+                  </div>
+                ) : syncConfig?.has_personal_token ? (
                   <div className="flex items-center gap-2">
-                    <span className="text-sm text-muted-foreground flex-1">Token configured</span>
+                    <span className="text-sm text-muted-foreground flex-1">Personal token configured</span>
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={handleClearToken}
                       disabled={updateSyncMutation.isPending}
                     >
-                      Remove Token
+                      Remove
                     </Button>
                   </div>
                 ) : (
@@ -391,7 +423,7 @@ export default function Profile() {
                   </div>
                 )}
                 <p className="text-xs text-muted-foreground">
-                  Find your API token at hardcover.app → Settings → API.
+                  The app-wide token is used by default. Set a personal token to sync your own Hardcover account.
                 </p>
               </div>
 

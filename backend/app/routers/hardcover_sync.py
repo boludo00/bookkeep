@@ -35,7 +35,9 @@ class HardcoverSyncConfig(BaseModel):
     sync_list_ids: List[int] = []
     default_format: str = "ebook"  # ebook | audiobook | both
     last_synced_at: Optional[str] = None
-    has_token: bool = False
+    has_token: bool = False        # True if any token is available (personal or global)
+    has_personal_token: bool = False  # True only if user set their own token
+    using_app_token: bool = False  # True if falling back to the global app token
 
 
 class HardcoverSyncUpdate(BaseModel):
@@ -81,6 +83,36 @@ async def _execute_with_token(query: str, variables: dict, token: str) -> dict:
     return data.get("data", {})
 
 
+def _get_global_token(db: Session) -> Optional[str]:
+    """Return the global Hardcover API token from app settings (decrypted)."""
+    from app.routers.settings import get_hardcover_token as _get_token
+    token, _ = _get_token(db)
+    return token or None
+
+
+def _get_effective_token(config: "models.UserHardcoverSync", db: Session) -> Optional[str]:
+    """Return the personal token if set, otherwise fall back to the global app token."""
+    if config.hardcover_api_token:
+        return decrypt_value(config.hardcover_api_token)
+    return _get_global_token(db)
+
+
+def _build_config_response(config: "models.UserHardcoverSync", db: Session) -> HardcoverSyncConfig:
+    has_personal = bool(config.hardcover_api_token)
+    global_token = _get_global_token(db)
+    has_any = has_personal or bool(global_token)
+    return HardcoverSyncConfig(
+        is_enabled=config.is_enabled,
+        sync_to_read=config.sync_to_read,
+        sync_list_ids=json.loads(config.sync_list_ids or "[]"),
+        default_format=config.default_format or "ebook",
+        last_synced_at=config.last_synced_at.isoformat() if config.last_synced_at else None,
+        has_token=has_any,
+        has_personal_token=has_personal,
+        using_app_token=not has_personal and bool(global_token),
+    )
+
+
 def _get_or_create_config(user: models.User, db: Session) -> models.UserHardcoverSync:
     config = db.query(models.UserHardcoverSync).filter(
         models.UserHardcoverSync.user_id == user.id
@@ -104,14 +136,7 @@ async def get_sync_config(
 ):
     """Return the current user's Hardcover sync configuration."""
     config = _get_or_create_config(current_user, db)
-    return HardcoverSyncConfig(
-        is_enabled=config.is_enabled,
-        sync_to_read=config.sync_to_read,
-        sync_list_ids=json.loads(config.sync_list_ids or "[]"),
-        default_format=config.default_format or "ebook",
-        last_synced_at=config.last_synced_at.isoformat() if config.last_synced_at else None,
-        has_token=bool(config.hardcover_api_token),
-    )
+    return _build_config_response(config, db)
 
 
 @router.put("/config", response_model=HardcoverSyncConfig)
@@ -129,10 +154,10 @@ async def update_sync_config(
         config.hardcover_api_token = encrypt_value(update.hardcover_api_token.strip())
 
     if update.is_enabled is not None:
-        if update.is_enabled and not config.hardcover_api_token:
+        if update.is_enabled and not _get_effective_token(config, db):
             raise HTTPException(
                 status_code=400,
-                detail="A Hardcover API token is required before enabling sync",
+                detail="A Hardcover API token is required before enabling sync (set one in Settings or add a personal token here)",
             )
         config.is_enabled = update.is_enabled
 
@@ -153,14 +178,7 @@ async def update_sync_config(
 
     logger.info("hardcover_sync_config_updated", user_id=current_user.id, is_enabled=config.is_enabled)
 
-    return HardcoverSyncConfig(
-        is_enabled=config.is_enabled,
-        sync_to_read=config.sync_to_read,
-        sync_list_ids=json.loads(config.sync_list_ids or "[]"),
-        default_format=config.default_format or "ebook",
-        last_synced_at=config.last_synced_at.isoformat() if config.last_synced_at else None,
-        has_token=bool(config.hardcover_api_token),
-    )
+    return _build_config_response(config, db)
 
 
 @router.get("/lists", response_model=List[HardcoverList])
@@ -168,12 +186,11 @@ async def get_hardcover_lists(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(database.get_db),
 ):
-    """Fetch the current user's Hardcover lists using their personal token."""
+    """Fetch the current user's Hardcover lists (personal token or global fallback)."""
     config = _get_or_create_config(current_user, db)
-    if not config.hardcover_api_token:
+    token = _get_effective_token(config, db)
+    if not token:
         raise HTTPException(status_code=400, detail="No Hardcover API token configured")
-
-    token = decrypt_value(config.hardcover_api_token)
     query = """
     {
       me {
@@ -199,7 +216,7 @@ async def run_sync_now(
     config = _get_or_create_config(current_user, db)
     if not config.is_enabled:
         raise HTTPException(status_code=400, detail="Hardcover sync is not enabled")
-    if not config.hardcover_api_token:
+    if not _get_effective_token(config, db):
         raise HTTPException(status_code=400, detail="No Hardcover API token configured")
 
     from app.tasks import sync_hardcover_lists_for_user

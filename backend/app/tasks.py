@@ -1675,14 +1675,22 @@ async def sync_hardcover_lists_for_user(user_id: int) -> None:
         config = db.query(UserHardcoverSync).filter(
             UserHardcoverSync.user_id == user_id
         ).first()
-        if not config or not config.is_enabled or not config.hardcover_api_token:
+        if not config or not config.is_enabled:
             return
 
         user = db.query(User).filter(User.id == user_id).first()
         if not user or not user.is_active:
             return
 
-        token = decrypt_value(config.hardcover_api_token)
+        # Use personal token if set, otherwise fall back to the global app token
+        if config.hardcover_api_token:
+            token = decrypt_value(config.hardcover_api_token)
+        else:
+            from app.routers.settings import get_hardcover_token as _get_global_token
+            token, _ = _get_global_token(db)
+        if not token:
+            logger.warning("hardcover_sync_no_token", user_id=user_id)
+            return
         hardcover_ids: set = set()
 
         # Collect to-read books
@@ -1794,7 +1802,6 @@ async def sync_hardcover_lists() -> None:
     try:
         configs = db.query(UserHardcoverSync).filter(
             UserHardcoverSync.is_enabled == True,
-            UserHardcoverSync.hardcover_api_token.isnot(None),
         ).all()
         user_ids = [c.user_id for c in configs]
     finally:
