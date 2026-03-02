@@ -996,8 +996,8 @@ export const downloadsApi = {
     download_url: string;
     protocol: string;
     release_title: string;
-    indexer: string;
-    size_bytes: number;
+    indexer?: string;
+    size_bytes?: number;
   }) =>
     apiRequest<DownloadResponse>('/api/downloads/download', {
       method: 'POST',
