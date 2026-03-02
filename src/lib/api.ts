@@ -1145,3 +1145,45 @@ export const directDownloadApi = {
       method: 'DELETE',
     }),
 };
+
+// Hardcover Sync types
+export interface HardcoverSyncConfig {
+  is_enabled: boolean;
+  sync_to_read: boolean;
+  sync_list_ids: number[];
+  default_format: string;
+  last_synced_at: string | null;
+  has_token: boolean;
+}
+
+export interface HardcoverList {
+  id: number;
+  name: string;
+}
+
+// Hardcover Sync API
+export const hardcoverSyncApi = {
+  getConfig: () =>
+    apiRequest<HardcoverSyncConfig>('/api/hardcover-sync/config'),
+
+  updateConfig: (data: {
+    hardcover_api_token?: string;
+    clear_token?: boolean;
+    is_enabled?: boolean;
+    sync_to_read?: boolean;
+    sync_list_ids?: number[];
+    default_format?: string;
+  }) =>
+    apiRequest<HardcoverSyncConfig>('/api/hardcover-sync/config', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  getLists: () =>
+    apiRequest<HardcoverList[]>('/api/hardcover-sync/lists'),
+
+  runSync: () =>
+    apiRequest<{ message: string }>('/api/hardcover-sync/run', {
+      method: 'POST',
+    }),
+};

@@ -1515,3 +1515,292 @@ async def _sync_usenet_downloads(db: Session, tasks: list) -> int:
     except Exception as e:
         logger.error("sync_usenet_error", error=str(e))
         return 0
+
+
+# ---------------------------------------------------------------------------
+# Hardcover list / to-read sync
+# ---------------------------------------------------------------------------
+
+_TO_READ_QUERY = """
+{
+  me {
+    user_books(where: {status_id: {_eq: 1}}) {
+      book {
+        id
+        title
+      }
+    }
+  }
+}
+"""
+
+_LIST_BOOKS_QUERY = """
+query GetListBooks($list_id: Int!) {
+  list_books(where: {list_id: {_eq: $list_id}}) {
+    book_id
+  }
+}
+"""
+
+_GET_BOOK_QUERY = """
+query GetBook($id: Int!) {
+  books_by_pk(id: $id) {
+    id
+    title
+    slug
+    release_year
+    release_date
+    pages
+    description
+    cached_image
+    cached_contributors
+    rating
+    ratings_count
+    users_count
+    activities_count
+    default_ebook_edition_id
+    default_audio_edition_id
+    default_physical_edition_id
+    book_series {
+      position
+      series {
+        id
+        name
+      }
+    }
+    contributions {
+      author {
+        id
+        name
+        slug
+      }
+    }
+    taggings(limit: 10) {
+      tag {
+        tag
+      }
+    }
+  }
+}
+"""
+
+
+async def _hardcover_graphql(query: str, variables: dict, token: str) -> dict:
+    """Execute a Hardcover GraphQL query with a specific token."""
+    import httpx
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {token}",
+    }
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.post(
+            "https://api.hardcover.app/v1/graphql",
+            headers=headers,
+            json={"query": query, "variables": variables or {}},
+        )
+    if not response.is_success:
+        logger.warning("hardcover_sync_request_failed", status=response.status_code)
+        return {}
+    data = response.json()
+    if "errors" in data:
+        logger.warning("hardcover_sync_graphql_errors", errors=data["errors"])
+        return {}
+    return data.get("data", {})
+
+
+async def _ensure_book_in_db(hardcover_id: int, token: str, db: Session) -> Optional[Any]:
+    """Return the local Book for a Hardcover ID, creating it from the API if needed."""
+    from app.routers.hardcover import _parse_hardcover_book
+
+    existing = db.query(Book).filter(Book.hardcover_id == hardcover_id).first()
+    if existing:
+        return existing
+
+    # Fetch from Hardcover
+    data = await _hardcover_graphql(_GET_BOOK_QUERY, {"id": hardcover_id}, token)
+    book_data = data.get("books_by_pk")
+    if not book_data:
+        return None
+
+    try:
+        parsed = _parse_hardcover_book(book_data)
+    except Exception as e:
+        logger.warning("hardcover_sync_parse_failed", hardcover_id=hardcover_id, error=str(e))
+        return None
+
+    cover_url = None
+    if parsed.cached_image and isinstance(parsed.cached_image, dict):
+        cover_url = parsed.cached_image.get("url")
+
+    author = None
+    if parsed.contributions:
+        author = parsed.contributions[0].author.name if parsed.contributions else None
+
+    genres = ",".join(t.tag.tag for t in (parsed.taggings or []) if t.tag) or None
+
+    db_book = Book(
+        title=parsed.title,
+        author=author,
+        hardcover_id=parsed.id,
+        hardcover_slug=parsed.slug,
+        cover_url=cover_url,
+        description=parsed.description,
+        page_count=parsed.pages,
+        rating=parsed.rating,
+        ratings_count=parsed.ratings_count,
+        users_count=parsed.users_count,
+        genres=genres,
+        release_year=parsed.release_year,
+        is_seed_data=False,
+    )
+    db.add(db_book)
+    try:
+        db.commit()
+        db.refresh(db_book)
+        logger.info("hardcover_sync_book_created", hardcover_id=hardcover_id, title=parsed.title)
+        return db_book
+    except Exception as e:
+        db.rollback()
+        logger.warning("hardcover_sync_book_create_failed", hardcover_id=hardcover_id, error=str(e))
+        return None
+
+
+async def sync_hardcover_lists_for_user(user_id: int) -> None:
+    """Sync Hardcover to-read / lists for a single user and create pending requests."""
+    from app.models import UserHardcoverSync, BookRequest, User
+    from app.encryption import decrypt_value
+
+    db: Session = SessionLocal()
+    try:
+        config = db.query(UserHardcoverSync).filter(
+            UserHardcoverSync.user_id == user_id
+        ).first()
+        if not config or not config.is_enabled or not config.hardcover_api_token:
+            return
+
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user or not user.is_active:
+            return
+
+        token = decrypt_value(config.hardcover_api_token)
+        hardcover_ids: set = set()
+
+        # Collect to-read books
+        if config.sync_to_read:
+            data = await _hardcover_graphql(_TO_READ_QUERY, {}, token)
+            for ub in data.get("me", {}).get("user_books", []):
+                bid = ub.get("book", {}).get("id")
+                if bid:
+                    hardcover_ids.add(int(bid))
+
+        # Collect list books
+        list_ids = json.loads(config.sync_list_ids or "[]")
+        for list_id in list_ids:
+            data = await _hardcover_graphql(_LIST_BOOKS_QUERY, {"list_id": list_id}, token)
+            for lb in data.get("list_books", []):
+                bid = lb.get("book_id")
+                if bid:
+                    hardcover_ids.add(int(bid))
+
+        formats = (
+            ["ebook", "audiobook"] if config.default_format == "both"
+            else [config.default_format or "ebook"]
+        )
+
+        requested = 0
+        skipped = 0
+
+        for hc_id in hardcover_ids:
+            db_book = await _ensure_book_in_db(hc_id, token, db)
+            if not db_book:
+                skipped += 1
+                continue
+
+            for fmt in formats:
+                # Skip if user lacks permission
+                if fmt == "ebook" and not user.can_request_ebook:
+                    continue
+                if fmt == "audiobook" and not user.can_request_audiobook:
+                    continue
+
+                # Skip if already in library
+                if fmt == "ebook" and db_book.ebook_available:
+                    continue
+                if fmt == "audiobook" and db_book.audiobook_available:
+                    continue
+
+                # Skip if a non-denied request already exists
+                existing = db.query(BookRequest).filter(
+                    BookRequest.book_id == db_book.id,
+                    BookRequest.format == fmt,
+                    BookRequest.status != "denied",
+                ).first()
+                if existing:
+                    continue
+
+                initial_status = "approved" if (
+                    (fmt == "ebook" and user.auto_approve_ebooks) or
+                    (fmt == "audiobook" and user.auto_approve_audiobooks)
+                ) else "pending"
+
+                db_request = BookRequest(
+                    book_id=db_book.id,
+                    user_id=user.id,
+                    format=fmt,
+                    status=initial_status,
+                    source="hardcover_sync",
+                )
+                db.add(db_request)
+                try:
+                    db.commit()
+                    db.refresh(db_request)
+                    requested += 1
+                    logger.info(
+                        "hardcover_sync_request_created",
+                        user_id=user.id,
+                        book_id=db_book.id,
+                        hardcover_id=hc_id,
+                        format=fmt,
+                        status=initial_status,
+                    )
+                except Exception as e:
+                    db.rollback()
+                    logger.warning("hardcover_sync_request_failed", book_id=db_book.id, error=str(e))
+
+            await asyncio.sleep(0.2)  # gentle rate limit
+
+        # Update last synced timestamp
+        config.last_synced_at = datetime.now(timezone.utc)
+        db.commit()
+
+        logger.info(
+            "hardcover_sync_user_complete",
+            user_id=user_id,
+            hardcover_ids=len(hardcover_ids),
+            requested=requested,
+            skipped=skipped,
+        )
+    except Exception as e:
+        logger.error("hardcover_sync_user_error", user_id=user_id, error=str(e))
+    finally:
+        db.close()
+
+
+async def sync_hardcover_lists() -> None:
+    """Global job: sync Hardcover lists for all users with sync enabled."""
+    from app.models import UserHardcoverSync
+
+    db: Session = SessionLocal()
+    try:
+        configs = db.query(UserHardcoverSync).filter(
+            UserHardcoverSync.is_enabled == True,
+            UserHardcoverSync.hardcover_api_token.isnot(None),
+        ).all()
+        user_ids = [c.user_id for c in configs]
+    finally:
+        db.close()
+
+    logger.info("hardcover_sync_job_starting", user_count=len(user_ids))
+    for uid in user_ids:
+        await sync_hardcover_lists_for_user(uid)
+    logger.info("hardcover_sync_job_complete", user_count=len(user_ids))

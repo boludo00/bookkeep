@@ -309,6 +309,24 @@ class DownloadTask(Base):
     book = relationship("Book", back_populates="download_tasks")
 
 
+class UserHardcoverSync(Base):
+    """Per-user Hardcover sync configuration for auto-requesting books from to-read / lists."""
+    __tablename__ = "user_hardcover_sync"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    hardcover_api_token = Column(String, nullable=True)  # encrypted, user's personal token
+    sync_to_read = Column(Boolean, default=True)  # watch status_id: 1 (to-read)
+    sync_list_ids = Column(Text, nullable=True)  # JSON array of Hardcover list IDs
+    default_format = Column(String, default="ebook")  # ebook | audiobook | both
+    is_enabled = Column(Boolean, default=False)
+    last_synced_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    user = relationship("User", backref="hardcover_sync")
+
+
 class DirectDownloadSettings(Base):
     """Direct download source configuration (Anna's Archive, Z-Library, etc.)"""
     __tablename__ = "direct_download_settings"

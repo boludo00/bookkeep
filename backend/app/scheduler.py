@@ -48,6 +48,11 @@ JOB_DEFINITIONS = {
         "description": "Sync download states from download clients",
         "type": "PROCESS",
     },
+    "sync_hardcover_lists": {
+        "default_interval": 6 * 60 * 60,  # 6 hours
+        "description": "Sync Hardcover to-read/list books and auto-request them",
+        "type": "PROCESS",
+    },
 }
 
 
@@ -293,6 +298,7 @@ async def initialize_jobs():
         sync_from_audiobookshelf,
         sync_missing_metadata,
         sync_download_states,
+        sync_hardcover_lists,
     )
 
     # Map job names to their async functions
@@ -303,6 +309,7 @@ async def initialize_jobs():
         "sync_from_audiobookshelf": sync_from_audiobookshelf,
         "sync_missing_metadata": sync_missing_metadata,
         "sync_download_states": sync_download_states,
+        "sync_hardcover_lists": sync_hardcover_lists,
     }
     
     db = SessionLocal()
