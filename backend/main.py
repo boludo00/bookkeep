@@ -9,7 +9,7 @@ import sys
 import os
 
 from app.database import engine, Base
-from app.routers import users, books, hardcover, requests, settings, readarr, jobs, booklore, audiobookshelf, auth, download_settings, downloads, direct_downloads
+from app.routers import users, books, hardcover, requests, settings, readarr, jobs, booklore, audiobookshelf, auth, download_settings, downloads, direct_downloads, oidc
 from app import cache
 
 # Configure Python's standard logging to emit structlog-style console output.
@@ -59,6 +59,17 @@ async def lifespan(app: FastAPI):
     # This is safe because migrations are idempotent and will add missing columns
     Base.metadata.create_all(bind=engine)
     logger.info("database_tables_ensured")
+
+    try:
+        from app.encryption import migrate_plaintext_secrets
+        from app.database import SessionLocal
+        db = SessionLocal()
+        migrated = migrate_plaintext_secrets(db)
+        db.close()
+        if migrated:
+            logger.info("secrets_encryption_migration_complete", count=migrated)
+    except Exception as e:
+        logger.warning("secrets_encryption_migration_failed", error=str(e))
     
     # Initialize cache
     await cache.init_cache()
@@ -109,6 +120,7 @@ app.include_router(download_settings.router, prefix="/api/download-settings", ta
 app.include_router(downloads.router, prefix="/api/downloads", tags=["downloads"])
 app.include_router(direct_downloads.router, prefix="/api/direct-downloads", tags=["direct-downloads"])
 app.include_router(auth.router)  # No prefix, it's already in the router
+app.include_router(oidc.router)  # No prefix, it's already in the router
 
 enable_debug_routes = os.getenv("bookkeep_DEBUG_ROUTES", "").lower() in {"1", "true", "yes"}
 if enable_debug_routes:

@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 import bcrypt
 from app import database, models, schemas
-from app.auth import get_current_user, require_admin
+from app.auth import get_current_user, get_current_user_optional, require_admin
 
 router = APIRouter()
 
@@ -91,7 +91,7 @@ def check_admin_exists(db: Session = Depends(database.get_db)):
 async def get_user(
     user_id: int,
     db: Session = Depends(database.get_db),
-    current_user: models.User = Depends(get_current_user)
+    current_user: models.User = Depends(require_admin)
 ):
     db_user = db.query(models.User).filter(models.User.id == user_id).first()
     if not db_user:
@@ -107,7 +107,7 @@ async def get_users(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     db: Session = Depends(database.get_db),
-    current_user: models.User = Depends(get_current_user)
+    current_user: models.User = Depends(require_admin)
 ):
     users = db.query(models.User).offset(skip).limit(limit).all()
     return users
@@ -116,13 +116,24 @@ async def get_users(
 @router.post("/", response_model=schemas.UserResponse, status_code=status.HTTP_201_CREATED)
 def create_user(
     user: schemas.UserCreate,
-    db: Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db),
+    current_user: Optional[models.User] = Depends(get_current_user_optional)
 ):
     """
     Create a new user.
     - If no admin exists, this endpoint is public and creates the first admin.
     - If admins exist, only admins can create new users.
     """
+    # Check if admin users exist
+    admin_exists = db.query(models.User).filter(models.User.is_admin == True).first() is not None
+
+    if admin_exists:
+        if not current_user or not current_user.is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only admins can create new users"
+            )
+
     # Validate password length (bcrypt has a 72-byte limit)
     password_bytes = user.password.encode('utf-8')
     if len(password_bytes) > 72:
@@ -145,17 +156,6 @@ def create_user(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email or username already registered"
-        )
-
-    # Check if admin users exist
-    admin_exists = db.query(models.User).filter(models.User.is_admin == True).count() > 0
-
-    # If admin exists and trying to create admin, deny (unless authenticated as admin)
-    # For now, allow admin creation only if no admin exists
-    if user.is_admin and admin_exists:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin users already exist. Only existing admins can create new admins."
         )
 
     # Create new user

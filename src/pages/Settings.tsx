@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Save, TestTube, CheckCircle, XCircle, Eye, EyeOff, Lock, Plus, Edit, Trash2, RefreshCw, Play, Clock, Database, Link } from 'lucide-react';
+import { Save, TestTube, CheckCircle, XCircle, Eye, EyeOff, Lock, Plus, Edit, Trash2, RefreshCw, Play, Clock, Database, Link, Shield, Loader2 } from 'lucide-react';
 import ProwlarrSettings from '@/components/settings/ProwlarrSettings';
 import DownloadClientsSettings from '@/components/settings/DownloadClientsSettings';
 import DirectDownloadSettings from '@/components/settings/DirectDownloadSettings';
@@ -42,7 +42,7 @@ import {
 } from '@/components/ui/table';
 import { toast } from 'sonner';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { settingsApi, readarrApi, jobsApi, bookloreApi, audiobookshelfApi, downloadSettingsApi, type BookloreServer, type AudiobookshelfServer, type ProwlarrServer, type DownloadClient } from '@/lib/api';
+import { settingsApi, readarrApi, jobsApi, bookloreApi, audiobookshelfApi, downloadSettingsApi, type BookloreServer, type AudiobookshelfServer, type ProwlarrServer, type DownloadClient, type OidcSettingsResponse } from '@/lib/api';
 import { usePageVisibility } from '@/hooks/usePageVisibility';
 
 interface ReadarrServer {
@@ -150,6 +150,259 @@ function Countdown({ nextExecution }: { nextExecution: string | null }) {
   }, [nextExecution]);
 
   return <span>{timeLeft}</span>;
+}
+
+function OidcSettingsCard() {
+  const queryClient = useQueryClient();
+  const [showSecret, setShowSecret] = useState(false);
+  const [formData, setFormData] = useState({
+    oidc_issuer_url: '',
+    oidc_client_id: '',
+    oidc_client_secret: '',
+    oidc_redirect_uri: '',
+    oidc_auto_register: 'true',
+    oidc_button_text: 'Sign in with SSO',
+  });
+
+  const { data: oidcSettings, isLoading: loadingOidc } = useQuery({
+    queryKey: ['oidc-settings'],
+    queryFn: () => settingsApi.getOidcSettings(),
+  });
+
+  useEffect(() => {
+    if (oidcSettings) {
+      setFormData({
+        oidc_issuer_url: oidcSettings.oidc_issuer_url.value || '',
+        oidc_client_id: oidcSettings.oidc_client_id.value || '',
+        oidc_client_secret: '',
+        oidc_redirect_uri: oidcSettings.oidc_redirect_uri.value || '',
+        oidc_auto_register: oidcSettings.oidc_auto_register.value || 'true',
+        oidc_button_text: oidcSettings.oidc_button_text.value || 'Sign in with SSO',
+      });
+    }
+  }, [oidcSettings]);
+
+  const saveMutation = useMutation({
+    mutationFn: (data: Record<string, string>) => settingsApi.updateOidcSettings(data),
+    onSuccess: () => {
+      toast.success('OIDC settings saved');
+      queryClient.invalidateQueries({ queryKey: ['oidc-settings'] });
+    },
+    onError: (err: any) => {
+      toast.error('Failed to save OIDC settings', { description: err.message });
+    },
+  });
+
+  const testMutation = useMutation({
+    mutationFn: () => settingsApi.testOidcConnection(),
+    onSuccess: (data) => {
+      toast.success('OIDC connection successful', { description: `Issuer: ${data.issuer}` });
+    },
+    onError: (err: any) => {
+      toast.error('OIDC connection failed', { description: err.message });
+    },
+  });
+
+  const handleSave = () => {
+    const payload: Record<string, string> = {};
+    if (formData.oidc_issuer_url && oidcSettings?.oidc_issuer_url.source !== 'env') {
+      payload.oidc_issuer_url = formData.oidc_issuer_url;
+    }
+    if (formData.oidc_client_id && oidcSettings?.oidc_client_id.source !== 'env') {
+      payload.oidc_client_id = formData.oidc_client_id;
+    }
+    if (formData.oidc_client_secret && oidcSettings?.oidc_client_secret.source !== 'env') {
+      payload.oidc_client_secret = formData.oidc_client_secret;
+    }
+    if (oidcSettings?.oidc_redirect_uri.source !== 'env') {
+      payload.oidc_redirect_uri = formData.oidc_redirect_uri;
+    }
+    if (oidcSettings?.oidc_auto_register.source !== 'env') {
+      payload.oidc_auto_register = formData.oidc_auto_register;
+    }
+    if (oidcSettings?.oidc_button_text.source !== 'env') {
+      payload.oidc_button_text = formData.oidc_button_text;
+    }
+    if (Object.keys(payload).length > 0) {
+      saveMutation.mutate(payload);
+    }
+  };
+
+  const isFieldLocked = (key: string) => {
+    if (!oidcSettings) return false;
+    const field = oidcSettings[key as keyof OidcSettingsResponse];
+    return typeof field === 'object' && field !== null && 'source' in field && field.source === 'env';
+  };
+
+  if (loadingOidc) {
+    return (
+      <Card className="bg-card border-border">
+        <CardContent className="flex items-center justify-center py-8">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="bg-card border-border">
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Shield className="h-5 w-5 text-muted-foreground" />
+            <div>
+              <CardTitle className="text-foreground">Single Sign-On (OIDC)</CardTitle>
+              <CardDescription>
+                Configure OpenID Connect for SSO authentication
+              </CardDescription>
+            </div>
+          </div>
+          <Badge variant={oidcSettings?.enabled ? 'default' : 'secondary'}>
+            {oidcSettings?.enabled ? 'Enabled' : 'Disabled'}
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Label htmlFor="oidc-issuer" className="text-foreground">Issuer URL</Label>
+            {isFieldLocked('oidc_issuer_url') && (
+              <Badge variant="secondary" className="text-xs flex items-center gap-1"><Lock className="h-3 w-3" />env</Badge>
+            )}
+          </div>
+          <Input
+            id="oidc-issuer"
+            placeholder="https://sso.example.com/application/o/bookkeep/"
+            value={formData.oidc_issuer_url}
+            onChange={(e) => setFormData(prev => ({ ...prev, oidc_issuer_url: e.target.value }))}
+            className="bg-secondary border-border"
+            disabled={isFieldLocked('oidc_issuer_url')}
+          />
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Label htmlFor="oidc-client-id" className="text-foreground">Client ID</Label>
+              {isFieldLocked('oidc_client_id') && (
+                <Badge variant="secondary" className="text-xs flex items-center gap-1"><Lock className="h-3 w-3" />env</Badge>
+              )}
+            </div>
+            <Input
+              id="oidc-client-id"
+              placeholder="Client ID from your OIDC provider"
+              value={formData.oidc_client_id}
+              onChange={(e) => setFormData(prev => ({ ...prev, oidc_client_id: e.target.value }))}
+              className="bg-secondary border-border"
+              disabled={isFieldLocked('oidc_client_id')}
+            />
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Label htmlFor="oidc-client-secret" className="text-foreground">Client Secret</Label>
+              {isFieldLocked('oidc_client_secret') && (
+                <Badge variant="secondary" className="text-xs flex items-center gap-1"><Lock className="h-3 w-3" />env</Badge>
+              )}
+            </div>
+            <div className="relative">
+              <Input
+                id="oidc-client-secret"
+                type={showSecret ? 'text' : 'password'}
+                placeholder={oidcSettings?.oidc_client_secret.value ? '(configured)' : 'Client secret'}
+                value={formData.oidc_client_secret}
+                onChange={(e) => setFormData(prev => ({ ...prev, oidc_client_secret: e.target.value }))}
+                className="bg-secondary border-border pr-10"
+                disabled={isFieldLocked('oidc_client_secret')}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                onClick={() => setShowSecret(!showSecret)}
+              >
+                {showSecret ? <EyeOff className="h-4 w-4 text-muted-foreground" /> : <Eye className="h-4 w-4 text-muted-foreground" />}
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Label htmlFor="oidc-redirect" className="text-foreground">Redirect URI (optional)</Label>
+            {isFieldLocked('oidc_redirect_uri') && (
+              <Badge variant="secondary" className="text-xs flex items-center gap-1"><Lock className="h-3 w-3" />env</Badge>
+            )}
+          </div>
+          <Input
+            id="oidc-redirect"
+            placeholder="Auto-detected from request URL"
+            value={formData.oidc_redirect_uri}
+            onChange={(e) => setFormData(prev => ({ ...prev, oidc_redirect_uri: e.target.value }))}
+            className="bg-secondary border-border"
+            disabled={isFieldLocked('oidc_redirect_uri')}
+          />
+          <p className="text-xs text-muted-foreground">
+            Leave blank to auto-detect. Must match the redirect URI in your OIDC provider.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="oidc-button-text" className="text-foreground">Button Text</Label>
+            <Input
+              id="oidc-button-text"
+              placeholder="Sign in with SSO"
+              value={formData.oidc_button_text}
+              onChange={(e) => setFormData(prev => ({ ...prev, oidc_button_text: e.target.value }))}
+              className="bg-secondary border-border"
+              disabled={isFieldLocked('oidc_button_text')}
+            />
+          </div>
+          <div className="flex items-center justify-between rounded-lg border border-border p-4">
+            <div className="space-y-0.5">
+              <Label htmlFor="oidc-auto-register" className="text-foreground font-medium">
+                Auto-register users
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Create accounts for new SSO users automatically
+              </p>
+            </div>
+            <Switch
+              id="oidc-auto-register"
+              checked={formData.oidc_auto_register === 'true'}
+              onCheckedChange={(checked) => setFormData(prev => ({ ...prev, oidc_auto_register: checked ? 'true' : 'false' }))}
+              disabled={isFieldLocked('oidc_auto_register')}
+            />
+          </div>
+        </div>
+
+        <div className="flex justify-between pt-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => testMutation.mutate()}
+            disabled={testMutation.isPending || !formData.oidc_issuer_url}
+          >
+            {testMutation.isPending ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <TestTube className="h-4 w-4 mr-2" />
+            )}
+            Test Connection
+          </Button>
+          <Button
+            size="sm"
+            onClick={handleSave}
+            disabled={saveMutation.isPending}
+          >
+            <Save className="h-4 w-4 mr-2" />
+            {saveMutation.isPending ? 'Saving...' : 'Save OIDC Settings'}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
 export default function Settings() {
@@ -1117,6 +1370,9 @@ export default function Settings() {
               </div>
             </CardContent>
           </Card>
+
+          {/* OIDC / SSO Settings */}
+          <OidcSettingsCard />
         </TabsContent>
 
         <TabsContent value="services" className="space-y-6 mt-6">

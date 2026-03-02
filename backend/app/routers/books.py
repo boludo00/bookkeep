@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import structlog
 import httpx
 from app import database, models, schemas, cache
+from app.auth import require_admin, get_current_user
 
 logger = structlog.get_logger()
 router = APIRouter()
@@ -142,7 +143,7 @@ async def check_book_availability(book: models.Book, db: Session) -> dict:
     }
 
 @router.post("/", response_model=schemas.BookResponse, status_code=status.HTTP_201_CREATED)
-def create_book(book: schemas.BookCreate, db: Session = Depends(database.get_db)):
+def create_book(book: schemas.BookCreate, db: Session = Depends(database.get_db), current_user: models.User = Depends(get_current_user)):
     book_dict = book.model_dump()
     
     # Check if book already exists by hardcover_id
@@ -250,7 +251,7 @@ def get_books(skip: int = 0, limit: int = 100, db: Session = Depends(database.ge
     ]
 
 @router.put("/{book_id}", response_model=schemas.BookResponse)
-def update_book(book_id: int, book: schemas.BookCreate, db: Session = Depends(database.get_db)):
+def update_book(book_id: int, book: schemas.BookCreate, db: Session = Depends(database.get_db), current_user: models.User = Depends(require_admin)):
     db_book = db.query(models.Book).filter(models.Book.id == book_id).first()
     if not db_book:
         raise HTTPException(
@@ -285,7 +286,7 @@ def update_book(book_id: int, book: schemas.BookCreate, db: Session = Depends(da
     return schemas.BookResponse(**response_dict)
 
 @router.delete("/{book_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_book(book_id: int, db: Session = Depends(database.get_db)):
+def delete_book(book_id: int, db: Session = Depends(database.get_db), current_user: models.User = Depends(require_admin)):
     db_book = db.query(models.Book).filter(models.Book.id == book_id).first()
     if not db_book:
         raise HTTPException(
@@ -298,7 +299,7 @@ def delete_book(book_id: int, db: Session = Depends(database.get_db)):
 
 
 @router.post("/{book_id}/refresh")
-async def refresh_book_availability(book_id: int, db: Session = Depends(database.get_db)):
+async def refresh_book_availability(book_id: int, db: Session = Depends(database.get_db), current_user: models.User = Depends(get_current_user)):
     """Refresh availability status for a single book by checking Booklore and Audiobookshelf."""
     db_book = db.query(models.Book).filter(models.Book.id == book_id).first()
     if not db_book:
@@ -312,7 +313,7 @@ async def refresh_book_availability(book_id: int, db: Session = Depends(database
 
 
 @router.post("/by-hardcover/{hardcover_id}/refresh")
-async def refresh_book_by_hardcover_id(hardcover_id: int, db: Session = Depends(database.get_db)):
+async def refresh_book_by_hardcover_id(hardcover_id: int, db: Session = Depends(database.get_db), current_user: models.User = Depends(get_current_user)):
     """Refresh availability status for a book by its Hardcover ID."""
     db_book = db.query(models.Book).filter(models.Book.hardcover_id == hardcover_id).first()
     if not db_book:
@@ -326,7 +327,7 @@ async def refresh_book_by_hardcover_id(hardcover_id: int, db: Session = Depends(
 
 
 @router.post("/series/{series_id}/refresh")
-async def refresh_series_availability(series_id: int, db: Session = Depends(database.get_db)):
+async def refresh_series_availability(series_id: int, db: Session = Depends(database.get_db), current_user: models.User = Depends(get_current_user)):
     """Refresh availability status for all books in a series."""
     books = db.query(models.Book).filter(models.Book.series_id == series_id).all()
     

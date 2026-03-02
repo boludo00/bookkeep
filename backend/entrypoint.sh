@@ -41,7 +41,7 @@ echo "Current directory: $(pwd)"
 echo "Checking Alembic version..."
 python -m alembic -c alembic.ini current || echo "No current version (database may be new)"
 echo "Running migrations..."
-if python -m alembic -c alembic.ini upgrade head 2>&1; then
+if python -m alembic -c alembic.ini upgrade heads 2>&1; then
     echo "Alembic migrations completed successfully"
     python -m alembic -c alembic.ini current
 else
