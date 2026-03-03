@@ -412,7 +412,8 @@ export default function Settings() {
   const [hardcoverToken, setHardcoverToken] = useState('');
   const [ebookDownloadPath, setEbookDownloadPath] = useState('');
   const [audiobookDownloadPath, setAudiobookDownloadPath] = useState('');
-  const [useHardlinks, setUseHardlinks] = useState(true);
+  const [useHardlinksEbook, setUseHardlinksEbook] = useState(true);
+  const [useHardlinksAudiobook, setUseHardlinksAudiobook] = useState(true);
   const [clearingCache, setClearingCache] = useState<string | null>(null);
   const [showServerModal, setShowServerModal] = useState(false);
   const [editingServer, setEditingServer] = useState<ReadarrServer | null>(null);
@@ -559,7 +560,8 @@ export default function Settings() {
     if (downloadPaths) {
       setEbookDownloadPath(downloadPaths.ebook_download_path || '');
       setAudiobookDownloadPath(downloadPaths.audiobook_download_path || '');
-      setUseHardlinks(downloadPaths.use_hardlinks);
+      setUseHardlinksEbook(downloadPaths.use_hardlinks_ebook);
+      setUseHardlinksAudiobook(downloadPaths.use_hardlinks_audiobook);
     }
   }, [downloadPaths]);
 
@@ -582,7 +584,8 @@ export default function Settings() {
     mutationFn: () => settingsApi.updateDownloadPaths({
       ebook_download_path: ebookDownloadPath || undefined,
       audiobook_download_path: audiobookDownloadPath || undefined,
-      use_hardlinks: useHardlinks,
+      use_hardlinks_ebook: useHardlinksEbook,
+      use_hardlinks_audiobook: useHardlinksAudiobook,
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['download-paths'] });
@@ -1344,18 +1347,36 @@ export default function Settings() {
                 <div className="space-y-0.5">
                   <div className="flex items-center gap-2">
                     <Link className="h-4 w-4 text-muted-foreground" />
-                    <Label htmlFor="use-hardlinks" className="text-foreground font-medium">
-                      Use hardlinks when importing
+                    <Label htmlFor="use-hardlinks-ebook" className="text-foreground font-medium">
+                      Use hardlinks for ebooks
                     </Label>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    When enabled, files are hardlinked to the destination (saves disk space). Disable this if your setup uses separate filesystems, NAS mounts, or Docker volumes where hardlinks are not supported.
+                    Hardlink ebook files to the destination (saves disk space). Disable if you need independent copies, e.g. to write metadata before sending to an eReader.
                   </p>
                 </div>
                 <Switch
-                  id="use-hardlinks"
-                  checked={useHardlinks}
-                  onCheckedChange={setUseHardlinks}
+                  id="use-hardlinks-ebook"
+                  checked={useHardlinksEbook}
+                  onCheckedChange={setUseHardlinksEbook}
+                />
+              </div>
+              <div className="flex items-center justify-between rounded-lg border border-border p-4">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <Link className="h-4 w-4 text-muted-foreground" />
+                    <Label htmlFor="use-hardlinks-audiobook" className="text-foreground font-medium">
+                      Use hardlinks for audiobooks
+                    </Label>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Hardlink audiobook files to the destination (saves disk space). Disable if your setup uses separate filesystems, NAS mounts, or Docker volumes where hardlinks are not supported.
+                  </p>
+                </div>
+                <Switch
+                  id="use-hardlinks-audiobook"
+                  checked={useHardlinksAudiobook}
+                  onCheckedChange={setUseHardlinksAudiobook}
                 />
               </div>
               <div className="flex justify-end">

@@ -25,6 +25,7 @@ DEFAULT_JOBS = {
     "sync_from_booklore": {"interval_seconds": 24 * 60 * 60, "type": "PROCESS"},
     "sync_from_audiobookshelf": {"interval_seconds": 24 * 60 * 60, "type": "PROCESS"},
     "sync_missing_metadata": {"interval_seconds": 6 * 60 * 60, "type": "PROCESS"},
+    "sync_hardcover_lists": {"interval_seconds": 6 * 60 * 60, "type": "PROCESS"},
 }
 
 # Available interval options (in seconds) for the dropdown

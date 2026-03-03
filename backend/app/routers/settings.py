@@ -87,12 +87,16 @@ async def set_hardcover_token(
 class DownloadPathsResponse(BaseModel):
     ebook_download_path: Optional[str] = None
     audiobook_download_path: Optional[str] = None
-    use_hardlinks: bool = True
+    use_hardlinks: bool = True  # legacy global fallback
+    use_hardlinks_ebook: bool = True
+    use_hardlinks_audiobook: bool = True
 
 class DownloadPathsUpdate(BaseModel):
     ebook_download_path: Optional[str] = None
     audiobook_download_path: Optional[str] = None
-    use_hardlinks: Optional[bool] = None
+    use_hardlinks: Optional[bool] = None  # legacy — kept for backwards compat
+    use_hardlinks_ebook: Optional[bool] = None
+    use_hardlinks_audiobook: Optional[bool] = None
 
 def get_setting_value(db: Session, key: str) -> Optional[str]:
     """Get a setting value from database or env var. Decrypts sensitive values."""
@@ -137,10 +141,19 @@ async def get_download_paths(
     use_hardlinks_val = get_setting_value(db, "use_hardlinks")
     use_hardlinks = use_hardlinks_val != "false"  # Default to True
 
+    # Per-format settings fall back to the global setting if not explicitly set
+    use_hardlinks_ebook_val = get_setting_value(db, "use_hardlinks_ebook")
+    use_hardlinks_ebook = use_hardlinks if use_hardlinks_ebook_val is None else use_hardlinks_ebook_val != "false"
+
+    use_hardlinks_audiobook_val = get_setting_value(db, "use_hardlinks_audiobook")
+    use_hardlinks_audiobook = use_hardlinks if use_hardlinks_audiobook_val is None else use_hardlinks_audiobook_val != "false"
+
     return DownloadPathsResponse(
         ebook_download_path=get_setting_value(db, "ebook_download_path"),
         audiobook_download_path=get_setting_value(db, "audiobook_download_path"),
         use_hardlinks=use_hardlinks,
+        use_hardlinks_ebook=use_hardlinks_ebook,
+        use_hardlinks_audiobook=use_hardlinks_audiobook,
     )
 
 @router.put("/download-paths")
@@ -158,6 +171,12 @@ async def update_download_paths(
 
     if update.use_hardlinks is not None:
         set_setting_value(db, "use_hardlinks", "true" if update.use_hardlinks else "false")
+
+    if update.use_hardlinks_ebook is not None:
+        set_setting_value(db, "use_hardlinks_ebook", "true" if update.use_hardlinks_ebook else "false")
+
+    if update.use_hardlinks_audiobook is not None:
+        set_setting_value(db, "use_hardlinks_audiobook", "true" if update.use_hardlinks_audiobook else "false")
 
     return {"message": "Download paths updated successfully"}
 

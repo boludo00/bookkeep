@@ -514,11 +514,19 @@ class DownloadOrchestrator:
                 db.commit()
                 return str(dest_path)
 
-            # Check if hardlinks are enabled (default: true)
-            use_hardlinks_setting = db.query(AppSettings).filter(
-                AppSettings.key == "use_hardlinks"
+            # Check if hardlinks are enabled — prefer format-specific setting,
+            # fall back to the global "use_hardlinks" (default: true)
+            format_key = f"use_hardlinks_{task.format}"  # e.g. "use_hardlinks_ebook"
+            format_setting = db.query(AppSettings).filter(
+                AppSettings.key == format_key
             ).first()
-            use_hardlinks = not (use_hardlinks_setting and use_hardlinks_setting.value == "false")
+            if format_setting is not None:
+                use_hardlinks = format_setting.value != "false"
+            else:
+                global_setting = db.query(AppSettings).filter(
+                    AppSettings.key == "use_hardlinks"
+                ).first()
+                use_hardlinks = not (global_setting and global_setting.value == "false")
 
             if use_hardlinks:
                 # Try to hardlink first (fast, no extra space), fall back to copy

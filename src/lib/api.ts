@@ -560,9 +560,9 @@ export const settingsApi = {
     }),
 
   getDownloadPaths: () =>
-    apiRequest<{ ebook_download_path: string | null; audiobook_download_path: string | null; use_hardlinks: boolean }>('/api/settings/download-paths'),
+    apiRequest<{ ebook_download_path: string | null; audiobook_download_path: string | null; use_hardlinks: boolean; use_hardlinks_ebook: boolean; use_hardlinks_audiobook: boolean }>('/api/settings/download-paths'),
 
-  updateDownloadPaths: (paths: { ebook_download_path?: string; audiobook_download_path?: string; use_hardlinks?: boolean }) =>
+  updateDownloadPaths: (paths: { ebook_download_path?: string; audiobook_download_path?: string; use_hardlinks?: boolean; use_hardlinks_ebook?: boolean; use_hardlinks_audiobook?: boolean }) =>
     apiRequest<{ message: string }>('/api/settings/download-paths', {
       method: 'PUT',
       body: JSON.stringify(paths),
@@ -1143,5 +1143,49 @@ export const directDownloadApi = {
   resetSettings: () =>
     apiRequest<{ success: boolean; message: string }>('/api/direct-downloads/settings', {
       method: 'DELETE',
+    }),
+};
+
+// Hardcover Sync types
+export interface HardcoverSyncConfig {
+  is_enabled: boolean;
+  sync_to_read: boolean;
+  sync_list_ids: number[];
+  default_format: string;
+  last_synced_at: string | null;
+  has_token: boolean;           // true if any token available (personal or global)
+  has_personal_token: boolean;  // true only if user set their own token
+  using_app_token: boolean;     // true if falling back to global app token
+}
+
+export interface HardcoverList {
+  id: number;
+  name: string;
+}
+
+// Hardcover Sync API
+export const hardcoverSyncApi = {
+  getConfig: () =>
+    apiRequest<HardcoverSyncConfig>('/api/hardcover-sync/config'),
+
+  updateConfig: (data: {
+    hardcover_api_token?: string;
+    clear_token?: boolean;
+    is_enabled?: boolean;
+    sync_to_read?: boolean;
+    sync_list_ids?: number[];
+    default_format?: string;
+  }) =>
+    apiRequest<HardcoverSyncConfig>('/api/hardcover-sync/config', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  getLists: () =>
+    apiRequest<HardcoverList[]>('/api/hardcover-sync/lists'),
+
+  runSync: () =>
+    apiRequest<{ message: string }>('/api/hardcover-sync/run', {
+      method: 'POST',
     }),
 };
