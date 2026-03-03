@@ -543,6 +543,12 @@ export const usersApi = {
     apiRequest<void>(`/api/users/${id}`, {
       method: 'DELETE',
     }),
+
+  resetPassword: (id: number, newPassword: string) =>
+    apiRequest<{ message: string }>(`/api/users/${id}/password`, {
+      method: 'PUT',
+      body: JSON.stringify({ new_password: newPassword }),
+    }),
 };
 
 // Settings API endpoints
