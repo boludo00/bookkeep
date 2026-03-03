@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Users as UsersIcon, Plus, Edit, Trash2, Shield, User as UserIcon, Check, X } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { Users as UsersIcon, Plus, Edit, Trash2, Shield, User as UserIcon, Search, KeyRound, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -53,14 +53,18 @@ interface User {
   created_at: string;
 }
 
+const PAGE_SIZE = 10;
+
 export default function Users() {
   const queryClient = useQueryClient();
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
-  
-  // Form state for create/edit
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [resetPassword, setResetPassword] = useState('');
+
   const [formData, setFormData] = useState({
     email: '',
     username: '',
@@ -79,6 +83,26 @@ export default function Users() {
     queryKey: ['users', 'with-requests'],
     queryFn: () => usersApi.getAll(0, 1000),
   });
+
+  const filteredUsers = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return users;
+    return users.filter(
+      (u) =>
+        u.username.toLowerCase().includes(q) ||
+        u.email.toLowerCase().includes(q) ||
+        (u.full_name?.toLowerCase().includes(q) ?? false) ||
+        String(u.id).includes(q),
+    );
+  }, [users, search]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / PAGE_SIZE));
+  const pagedUsers = filteredUsers.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const handleSearchChange = (value: string) => {
+    setSearch(value);
+    setPage(1);
+  };
 
   const createUserMutation = useMutation({
     mutationFn: (userData: {
@@ -114,6 +138,18 @@ export default function Users() {
     },
   });
 
+  const resetPasswordMutation = useMutation({
+    mutationFn: ({ id, password }: { id: number; password: string }) =>
+      usersApi.resetPassword(id, password),
+    onSuccess: () => {
+      toast.success('Password reset successfully');
+      setResetPassword('');
+    },
+    onError: (error: any) => {
+      toast.error(error.message || 'Failed to reset password');
+    },
+  });
+
   const deleteUserMutation = useMutation({
     mutationFn: (id: number) => usersApi.delete(id),
     onSuccess: () => {
@@ -141,6 +177,7 @@ export default function Users() {
       auto_approve_ebooks: true,
       auto_approve_audiobooks: true,
     });
+    setResetPassword('');
   };
 
   const handleCreate = () => {
@@ -159,10 +196,11 @@ export default function Users() {
 
   const handleEdit = (user: User) => {
     setSelectedUser(user);
+    setResetPassword('');
     setFormData({
       email: user.email,
       username: user.username,
-      password: '', // Don't pre-fill password
+      password: '',
       full_name: user.full_name || '',
       is_admin: user.is_admin,
       is_active: user.is_active,
@@ -177,21 +215,30 @@ export default function Users() {
 
   const handleUpdate = () => {
     if (!selectedUser) return;
+    updateUserMutation.mutate({
+      id: selectedUser.id,
+      update: {
+        email: formData.email,
+        username: formData.username,
+        full_name: formData.full_name || undefined,
+        is_admin: formData.is_admin,
+        is_active: formData.is_active,
+        can_request_ebook: formData.can_request_ebook,
+        can_request_audiobook: formData.can_request_audiobook,
+        can_download: formData.can_download,
+        auto_approve_ebooks: formData.auto_approve_ebooks,
+        auto_approve_audiobooks: formData.auto_approve_audiobooks,
+      },
+    });
+  };
 
-    const update: any = {
-      email: formData.email,
-      username: formData.username,
-      full_name: formData.full_name || undefined,
-      is_admin: formData.is_admin,
-      is_active: formData.is_active,
-      can_request_ebook: formData.can_request_ebook,
-      can_request_audiobook: formData.can_request_audiobook,
-      can_download: formData.can_download,
-      auto_approve_ebooks: formData.auto_approve_ebooks,
-      auto_approve_audiobooks: formData.auto_approve_audiobooks,
-    };
-
-    updateUserMutation.mutate({ id: selectedUser.id, update });
+  const handleResetPassword = () => {
+    if (!selectedUser) return;
+    if (resetPassword.length < 8) {
+      toast.error('Password must be at least 8 characters');
+      return;
+    }
+    resetPasswordMutation.mutate({ id: selectedUser.id, password: resetPassword });
   };
 
   const handleDelete = (user: User) => {
@@ -210,14 +257,9 @@ export default function Users() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">User Management</h1>
-          <p className="text-muted-foreground mt-1">
-            Manage users and their permissions
-          </p>
+          <p className="text-muted-foreground mt-1">Manage users and their permissions</p>
         </div>
-        <Button onClick={() => {
-          resetForm();
-          setCreateDialogOpen(true);
-        }}>
+        <Button onClick={() => { resetForm(); setCreateDialogOpen(true); }}>
           <Plus className="h-4 w-4 mr-2" />
           Create User
         </Button>
@@ -232,29 +274,38 @@ export default function Users() {
         <div className="p-4 rounded-lg bg-card border border-border">
           <p className="text-sm text-muted-foreground">Admins</p>
           <p className="text-3xl font-bold text-primary mt-1">
-            {users.filter((u: User) => u.is_admin).length}
+            {users.filter((u) => u.is_admin).length}
           </p>
         </div>
         <div className="p-4 rounded-lg bg-card border border-border">
           <p className="text-sm text-muted-foreground">Active Users</p>
           <p className="text-3xl font-bold text-success mt-1">
-            {users.filter((u: User) => u.is_active).length}
+            {users.filter((u) => u.is_active).length}
           </p>
         </div>
         <div className="p-4 rounded-lg bg-card border border-border">
           <p className="text-sm text-muted-foreground">Total Requests</p>
           <p className="text-3xl font-bold text-foreground mt-1">
-            {users.reduce((sum: number, u: User) => sum + (u.total_requests || 0), 0)}
+            {users.reduce((sum, u) => sum + (u.total_requests || 0), 0)}
           </p>
         </div>
+      </div>
+
+      {/* Search */}
+      <div className="relative max-w-sm">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Input
+          value={search}
+          onChange={(e) => handleSearchChange(e.target.value)}
+          placeholder="Search by name, email, or ID…"
+          className="pl-9 bg-card border-border"
+        />
       </div>
 
       {/* Users Table */}
       <div className="rounded-lg border border-border overflow-hidden">
         {isLoading ? (
-          <div className="text-center py-12 text-muted-foreground">
-            Loading users...
-          </div>
+          <div className="text-center py-12 text-muted-foreground">Loading users…</div>
         ) : error ? (
           <div className="text-center py-12">
             <div className="text-destructive mb-2 font-medium">Failed to load users</div>
@@ -262,14 +313,15 @@ export default function Users() {
               {(error as any)?.message || 'Please check your connection and try again'}
             </div>
           </div>
-        ) : users.length === 0 ? (
+        ) : filteredUsers.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">
-            No users found
+            {search ? 'No users match your search' : 'No users found'}
           </div>
         ) : (
           <Table>
             <TableHeader>
               <TableRow className="bg-secondary/50 hover:bg-secondary/50">
+                <TableHead className="text-muted-foreground w-12">ID</TableHead>
                 <TableHead className="text-muted-foreground">User</TableHead>
                 <TableHead className="text-muted-foreground">Email</TableHead>
                 <TableHead className="text-muted-foreground">Role</TableHead>
@@ -280,8 +332,11 @@ export default function Users() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {users.map((user: User) => (
+              {pagedUsers.map((user) => (
                 <TableRow key={user.id} className="bg-card hover:bg-muted/50">
+                  <TableCell className="text-muted-foreground font-mono text-sm">
+                    {user.id}
+                  </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-3">
                       <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
@@ -307,9 +362,7 @@ export default function Users() {
                         Admin
                       </Badge>
                     ) : (
-                      <Badge variant="outline" className="border-border">
-                        User
-                      </Badge>
+                      <Badge variant="outline" className="border-border">User</Badge>
                     )}
                   </TableCell>
                   <TableCell className="text-foreground">{user.total_requests || 0}</TableCell>
@@ -332,22 +385,14 @@ export default function Users() {
                   </TableCell>
                   <TableCell>
                     {user.is_active ? (
-                      <Badge variant="outline" className="border-success text-success">
-                        Active
-                      </Badge>
+                      <Badge variant="outline" className="border-success text-success">Active</Badge>
                     ) : (
-                      <Badge variant="outline" className="border-destructive text-destructive">
-                        Inactive
-                      </Badge>
+                      <Badge variant="outline" className="border-destructive text-destructive">Inactive</Badge>
                     )}
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => handleEdit(user)}
-                      >
+                      <Button size="sm" variant="ghost" onClick={() => handleEdit(user)}>
                         <Edit className="h-4 w-4" />
                       </Button>
                       <Button
@@ -366,6 +411,36 @@ export default function Users() {
           </Table>
         )}
       </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between text-sm text-muted-foreground">
+          <span>
+            Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filteredUsers.length)} of {filteredUsers.length} users
+          </span>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={page === 1}
+              onClick={() => setPage((p) => p - 1)}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span>
+              Page {page} of {totalPages}
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={page === totalPages}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Create User Dialog */}
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
@@ -427,9 +502,7 @@ export default function Users() {
             </div>
           </div>
           <div className="flex justify-end gap-3">
-            <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>
-              Cancel
-            </Button>
+            <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>Cancel</Button>
             <Button onClick={handleCreate} disabled={createUserMutation.isPending}>
               Create User
             </Button>
@@ -438,10 +511,17 @@ export default function Users() {
       </Dialog>
 
       {/* Edit User Dialog */}
-      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+      <Dialog open={editDialogOpen} onOpenChange={(open) => { setEditDialogOpen(open); if (!open) setResetPassword(''); }}>
         <DialogContent className="bg-card border-border max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-foreground">Edit User</DialogTitle>
+            <DialogTitle className="text-foreground">
+              Edit User
+              {selectedUser && (
+                <span className="ml-2 text-sm font-normal text-muted-foreground">
+                  ID: {selectedUser.id}
+                </span>
+              )}
+            </DialogTitle>
             <DialogDescription className="text-muted-foreground">
               Update user information and permissions
             </DialogDescription>
@@ -472,7 +552,7 @@ export default function Users() {
                 className="bg-secondary border-border"
               />
             </div>
-            
+
             <div className="space-y-4 pt-4 border-t border-border">
               <div className="flex items-center justify-between">
                 <div>
@@ -498,17 +578,11 @@ export default function Users() {
 
             <div className="space-y-4 pt-4 border-t border-border">
               <h3 className="text-sm font-semibold text-foreground">Request Permissions</h3>
-              <p className="text-sm text-muted-foreground mb-4">
-                Control which formats the user can request
-              </p>
-              
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
                     <Label className="text-foreground">Can Request Ebooks</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Allow user to request ebooks
-                    </p>
+                    <p className="text-sm text-muted-foreground">Allow user to request ebooks</p>
                   </div>
                   <Switch
                     checked={formData.can_request_ebook}
@@ -518,9 +592,7 @@ export default function Users() {
                 <div className="flex items-center justify-between">
                   <div>
                     <Label className="text-foreground">Can Request Audiobooks</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Allow user to request audiobooks
-                    </p>
+                    <p className="text-sm text-muted-foreground">Allow user to request audiobooks</p>
                   </div>
                   <Switch
                     checked={formData.can_request_audiobook}
@@ -530,9 +602,7 @@ export default function Users() {
                 <div className="flex items-center justify-between">
                   <div>
                     <Label className="text-foreground">Can Download</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Allow user to search indexers and download books
-                    </p>
+                    <p className="text-sm text-muted-foreground">Allow user to search indexers and download books</p>
                   </div>
                   <Switch
                     checked={formData.can_download}
@@ -544,17 +614,11 @@ export default function Users() {
 
             <div className="space-y-4 pt-4 border-t border-border">
               <h3 className="text-sm font-semibold text-foreground">Auto-Approve Permissions</h3>
-              <p className="text-sm text-muted-foreground mb-4">
-                Grant permission to automatically approve requests for specific formats
-              </p>
-              
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
                     <Label className="text-foreground">Auto-Approve Ebooks</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Automatically approve ebook requests
-                    </p>
+                    <p className="text-sm text-muted-foreground">Automatically approve ebook requests</p>
                   </div>
                   <Switch
                     checked={formData.auto_approve_ebooks}
@@ -564,9 +628,7 @@ export default function Users() {
                 <div className="flex items-center justify-between">
                   <div>
                     <Label className="text-foreground">Auto-Approve Audiobooks</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Automatically approve audiobook requests
-                    </p>
+                    <p className="text-sm text-muted-foreground">Automatically approve audiobook requests</p>
                   </div>
                   <Switch
                     checked={formData.auto_approve_audiobooks}
@@ -575,11 +637,38 @@ export default function Users() {
                 </div>
               </div>
             </div>
+
+            {/* Password Reset */}
+            <div className="space-y-3 pt-4 border-t border-border">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                  <KeyRound className="h-4 w-4" />
+                  Reset Password
+                </h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Set a new password for this user without requiring their current one.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Input
+                  type="password"
+                  value={resetPassword}
+                  onChange={(e) => setResetPassword(e.target.value)}
+                  placeholder="New password (min. 8 characters)"
+                  className="bg-secondary border-border"
+                />
+                <Button
+                  variant="outline"
+                  onClick={handleResetPassword}
+                  disabled={resetPassword.length < 8 || resetPasswordMutation.isPending}
+                >
+                  Reset
+                </Button>
+              </div>
+            </div>
           </div>
           <div className="flex justify-end gap-3">
-            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
-              Cancel
-            </Button>
+            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>Cancel</Button>
             <Button onClick={handleUpdate} disabled={updateUserMutation.isPending}>
               Save Changes
             </Button>
@@ -593,7 +682,7 @@ export default function Users() {
           <AlertDialogHeader>
             <AlertDialogTitle className="text-foreground">Delete User</AlertDialogTitle>
             <AlertDialogDescription className="text-muted-foreground">
-              Are you sure you want to delete <strong>{selectedUser?.username}</strong>? 
+              Are you sure you want to delete <strong>{selectedUser?.username}</strong>?{' '}
               This action cannot be undone. All their requests will remain but will be orphaned.
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -611,4 +700,3 @@ export default function Users() {
     </div>
   );
 }
-
