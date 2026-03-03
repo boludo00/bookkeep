@@ -202,7 +202,7 @@ async def get_hardcover_lists(
     }
     """
     data = await _execute_with_token(query, {}, token)
-    lists = data.get("me", {}).get("lists", [])
+    lists = data["me"][0].get("lists", [])
     return [HardcoverList(id=l["id"], name=l["name"]) for l in lists]
 
 

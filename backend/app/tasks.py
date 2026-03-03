@@ -1669,6 +1669,7 @@ async def sync_hardcover_lists_for_user(user_id: int) -> None:
     """Sync Hardcover to-read / lists for a single user and create pending requests."""
     from app.models import UserHardcoverSync, BookRequest, User
     from app.encryption import decrypt_value
+    import json
 
     db: Session = SessionLocal()
     try:
@@ -1696,7 +1697,7 @@ async def sync_hardcover_lists_for_user(user_id: int) -> None:
         # Collect to-read books
         if config.sync_to_read:
             data = await _hardcover_graphql(_TO_READ_QUERY, {}, token)
-            for ub in data.get("me", {}).get("user_books", []):
+            for ub in data.get("me", [])[0].get("user_books", []):
                 bid = ub.get("book", {}).get("id")
                 if bid:
                     hardcover_ids.add(int(bid))
