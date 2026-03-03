@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Settings, Calendar, Hash, Clock, CheckCircle, XCircle, Loader2, Eye, EyeOff, KeyRound } from 'lucide-react';
+import { Settings, Calendar, Hash, Clock, CheckCircle, XCircle, Loader2, Eye, EyeOff, KeyRound, RefreshCw, BookMarked } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,9 +9,13 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Separator } from '@/components/ui/separator';
 import { toast } from 'sonner';
 import { useUser } from '@/contexts/UserContext';
-import { usersApi, requestsApi } from '@/lib/api';
+import { usersApi, requestsApi, hardcoverSyncApi } from '@/lib/api';
 import type { BookRequest } from '@/types/book';
 
 function formatDate(dateString: string): string {
@@ -95,6 +99,60 @@ export default function Profile() {
       return;
     }
     passwordMutation.mutate();
+  };
+
+  // Hardcover Sync state
+  const [hardcoverToken, setHardcoverToken] = useState('');
+  const [showHardcoverToken, setShowHardcoverToken] = useState(false);
+
+  const { data: syncConfig, isLoading: syncConfigLoading } = useQuery({
+    queryKey: ['hardcoverSyncConfig'],
+    queryFn: () => hardcoverSyncApi.getConfig(),
+    enabled: !!user,
+  });
+
+  const { data: hardcoverLists = [], isLoading: listsLoading } = useQuery({
+    queryKey: ['hardcoverLists'],
+    queryFn: () => hardcoverSyncApi.getLists(),
+    enabled: !!syncConfig?.has_token,
+    retry: false,
+  });
+
+  const updateSyncMutation = useMutation({
+    mutationFn: hardcoverSyncApi.updateConfig,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['hardcoverSyncConfig'] });
+      queryClient.invalidateQueries({ queryKey: ['hardcoverLists'] });
+    },
+    onError: (error: any) => {
+      toast.error('Failed to update Hardcover sync', { description: error.message });
+    },
+  });
+
+  const runSyncMutation = useMutation({
+    mutationFn: hardcoverSyncApi.runSync,
+    onSuccess: (data) => {
+      toast.success('Sync started', { description: data.message });
+      queryClient.invalidateQueries({ queryKey: ['hardcoverSyncConfig'] });
+    },
+    onError: (error: any) => {
+      toast.error('Sync failed', { description: error.message });
+    },
+  });
+
+  const handleSaveToken = () => {
+    if (!hardcoverToken.trim()) return;
+    updateSyncMutation.mutate(
+      { hardcover_api_token: hardcoverToken.trim() },
+      { onSuccess: () => { toast.success('API token saved'); setHardcoverToken(''); } }
+    );
+  };
+
+  const handleClearToken = () => {
+    updateSyncMutation.mutate(
+      { clear_token: true, is_enabled: false },
+      { onSuccess: () => toast.success('API token removed') }
+    );
   };
 
   if (userLoading) {
@@ -272,6 +330,227 @@ export default function Profile() {
           </div>
         )}
       </div>
+
+      {/* Hardcover List Sync */}
+      <Card className="bg-card/50 border-border">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <BookMarked className="h-5 w-5 text-primary" />
+            <CardTitle>Hardcover List Sync</CardTitle>
+          </div>
+          <CardDescription>
+            Automatically request books from your Hardcover to-read list or custom lists.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {syncConfigLoading ? (
+            <div className="flex justify-center py-4">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <>
+              {/* API Token */}
+              <div className="space-y-2">
+                <Label>Hardcover API Token</Label>
+                {syncConfig?.using_app_token ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <CheckCircle className="h-4 w-4 text-emerald-500" />
+                      Using the app-wide Hardcover token
+                    </div>
+                    <div className="flex gap-2">
+                      <div className="relative flex-1">
+                        <Input
+                          type={showHardcoverToken ? 'text' : 'password'}
+                          placeholder="Override with your own token (optional)"
+                          value={hardcoverToken}
+                          onChange={(e) => setHardcoverToken(e.target.value)}
+                          className="pr-10"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowHardcoverToken(!showHardcoverToken)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        >
+                          {showHardcoverToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
+                      <Button
+                        onClick={handleSaveToken}
+                        disabled={!hardcoverToken.trim() || updateSyncMutation.isPending}
+                        variant="outline"
+                      >
+                        Save
+                      </Button>
+                    </div>
+                  </div>
+                ) : syncConfig?.has_personal_token ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-muted-foreground flex-1">Personal token configured</span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleClearToken}
+                      disabled={updateSyncMutation.isPending}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Input
+                        type={showHardcoverToken ? 'text' : 'password'}
+                        placeholder="Paste your Hardcover API token"
+                        value={hardcoverToken}
+                        onChange={(e) => setHardcoverToken(e.target.value)}
+                        className="pr-10"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowHardcoverToken(!showHardcoverToken)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      >
+                        {showHardcoverToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                    <Button
+                      onClick={handleSaveToken}
+                      disabled={!hardcoverToken.trim() || updateSyncMutation.isPending}
+                    >
+                      Save
+                    </Button>
+                  </div>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  The app-wide token is used by default. Set a personal token to sync your own Hardcover account.
+                </p>
+              </div>
+
+              {syncConfig?.has_token && (
+                <>
+                  <Separator />
+
+                  {/* Enable toggle */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label>Enable Sync</Label>
+                      <p className="text-sm text-muted-foreground">Automatically request books on schedule</p>
+                    </div>
+                    <Switch
+                      checked={syncConfig.is_enabled}
+                      onCheckedChange={(checked) =>
+                        updateSyncMutation.mutate({ is_enabled: checked })
+                      }
+                      disabled={updateSyncMutation.isPending}
+                    />
+                  </div>
+
+                  {/* Sync to-read */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label>Sync "Want to Read"</Label>
+                      <p className="text-sm text-muted-foreground">Request books from your to-read status</p>
+                    </div>
+                    <Switch
+                      checked={syncConfig.sync_to_read}
+                      onCheckedChange={(checked) =>
+                        updateSyncMutation.mutate({ sync_to_read: checked })
+                      }
+                      disabled={updateSyncMutation.isPending}
+                    />
+                  </div>
+
+                  {/* Default format */}
+                  <div className="space-y-2">
+                    <Label>Default Format</Label>
+                    <Select
+                      value={syncConfig.default_format}
+                      onValueChange={(value) =>
+                        updateSyncMutation.mutate({ default_format: value })
+                      }
+                      disabled={updateSyncMutation.isPending}
+                    >
+                      <SelectTrigger className="w-48">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ebook">Ebook</SelectItem>
+                        <SelectItem value="audiobook">Audiobook</SelectItem>
+                        <SelectItem value="both">Both</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Custom lists */}
+                  <div className="space-y-2">
+                    <Label>Custom Lists</Label>
+                    <p className="text-sm text-muted-foreground">Also sync books from these lists</p>
+                    {listsLoading ? (
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Loading lists…
+                      </div>
+                    ) : hardcoverLists.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No custom lists found on your Hardcover account.</p>
+                    ) : (
+                      <div className="space-y-2 max-h-48 overflow-y-auto">
+                        {hardcoverLists.map((list) => (
+                          <div key={list.id} className="flex items-center gap-2">
+                            <Checkbox
+                              id={`list-${list.id}`}
+                              checked={syncConfig.sync_list_ids.includes(list.id)}
+                              onCheckedChange={(checked) => {
+                                const updated = checked
+                                  ? [...syncConfig.sync_list_ids, list.id]
+                                  : syncConfig.sync_list_ids.filter((id) => id !== list.id);
+                                updateSyncMutation.mutate({ sync_list_ids: updated });
+                              }}
+                              disabled={updateSyncMutation.isPending}
+                            />
+                            <label htmlFor={`list-${list.id}`} className="text-sm cursor-pointer">
+                              {list.name}
+                            </label>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <Separator />
+
+                  {/* Status & manual sync */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      {syncConfig.last_synced_at ? (
+                        <p className="text-sm text-muted-foreground">
+                          Last synced: {new Date(syncConfig.last_synced_at).toLocaleString()}
+                        </p>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">Never synced</p>
+                      )}
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => runSyncMutation.mutate()}
+                      disabled={!syncConfig.is_enabled || runSyncMutation.isPending}
+                      className="gap-2"
+                    >
+                      {runSyncMutation.isPending ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-4 w-4" />
+                      )}
+                      Sync Now
+                    </Button>
+                  </div>
+                </>
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Password Change Dialog */}
       <Dialog open={showPasswordDialog} onOpenChange={setShowPasswordDialog}>
