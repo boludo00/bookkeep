@@ -12,40 +12,74 @@ fi
 # Set PYTHONPATH - Alembic needs to import app.* modules
 export PYTHONPATH="/app/backend:$PYTHONPATH"
 
-# Run Alembic migrations before starting the app
-# Run from /app/backend where alembic.ini is located
-echo "Running Alembic migrations..."
-echo "Working directory: $(pwd)"
-echo "PYTHONPATH: $PYTHONPATH"
+echo "Running database migrations..."
 echo "DATABASE_URL: $DATABASE_URL"
-if [[ "$DATABASE_URL" == sqlite:* ]]; then
-    echo "Database file will be at: /app/data/bookkeep.db"
-    # Check if database file exists
-    if [ -f "/app/data/bookkeep.db" ]; then
-        echo "Database file exists"
-    else
-        echo "Database file does not exist yet (will be created by migration)"
+
+cd /app/backend
+
+# Check current Alembic tracking state
+echo "Checking Alembic version..."
+ALEMBIC_CURRENT=$(python -m alembic -c alembic.ini current 2>&1)
+echo "Alembic current: $ALEMBIC_CURRENT"
+
+# If there is no alembic_version table the command prints nothing or errors.
+# This happens when the DB was bootstrapped via SQLAlchemy create_all without
+# Alembic ever having run (legacy deployments).  We detect this and stamp the
+# database at the correct revision so Alembic only runs the truly new migrations.
+if ! echo "$ALEMBIC_CURRENT" | grep -q "(head)\|Rev:"; then
+    echo "No Alembic version found. Checking whether the database already has tables..."
+
+    TABLES_EXIST=$(python -c "
+import sys, os
+sys.path.insert(0, '/app/backend')
+from sqlalchemy import inspect, create_engine
+engine = create_engine(os.environ['DATABASE_URL'])
+try:
+    print('yes' if inspect(engine).has_table('users') else 'no')
+except Exception:
+    print('no')
+" 2>/dev/null || echo "no")
+
+    echo "Existing tables found: $TABLES_EXIST"
+
+    if [ "$TABLES_EXIST" = "yes" ]; then
+        # The database has data but was never tracked by Alembic.
+        # Check whether oidc_subject already exists to decide which revision to
+        # stamp so we don't re-run migrations that were applied via create_all.
+        OIDC_COL=$(python -c "
+import sys, os
+sys.path.insert(0, '/app/backend')
+from sqlalchemy import inspect, create_engine
+engine = create_engine(os.environ['DATABASE_URL'])
+try:
+    cols = [c['name'] for c in inspect(engine).get_columns('users')]
+    print('yes' if 'oidc_subject' in cols else 'no')
+except Exception:
+    print('no')
+" 2>/dev/null || echo "no")
+
+        if [ "$OIDC_COL" = "yes" ]; then
+            # Schema is fully up to date; stamp as head so no migrations run.
+            echo "Schema is current. Stamping database as head..."
+            python -m alembic -c alembic.ini stamp heads
+        else
+            # Schema is behind (oidc_subject missing). Stamp at 034 so Alembic
+            # runs 035 and 036 to bring the schema up to date.
+            echo "Legacy database missing recent columns. Stamping at revision 034..."
+            python -m alembic -c alembic.ini stamp 034
+        fi
     fi
 fi
 
-# Create tables first (SQLAlchemy will create all tables with current schema)
-# Then migrations will add any missing columns (idempotent)
-cd /app
-echo "Creating database tables if they don't exist..."
-python -c "from app.database import engine, Base; Base.metadata.create_all(bind=engine); print('Tables created/verified')"
-
-# Now run migrations to add any missing columns
-cd /app/backend
-echo "Running Alembic migrations..."
-echo "Current directory: $(pwd)"
-echo "Checking Alembic version..."
-python -m alembic -c alembic.ini current || echo "No current version (database may be new)"
-echo "Running migrations..."
-if python -m alembic -c alembic.ini upgrade heads 2>&1; then
-    echo "Alembic migrations completed successfully"
+# Run all pending migrations.  Fail loudly if something goes wrong so the
+# problem is visible in container logs rather than silently masked.
+echo "Applying pending Alembic migrations..."
+if python -m alembic -c alembic.ini upgrade heads; then
+    echo "Migrations completed successfully."
     python -m alembic -c alembic.ini current
 else
-    echo "WARNING: Alembic migrations had issues (this is okay if columns already exist)"
+    echo "ERROR: Alembic migrations failed. Check the logs above for details."
+    exit 1
 fi
 
 # Start the application from /app (where uvicorn expects to find backend module)
