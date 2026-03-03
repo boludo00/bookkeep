@@ -265,6 +265,43 @@ async def update_user(
     return db_user
 
 
+class AdminPasswordResetRequest(schemas.BaseModel):
+    new_password: str
+
+
+@router.put("/{user_id}/password")
+async def admin_reset_password(
+    user_id: int,
+    request: AdminPasswordResetRequest,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(require_admin)
+):
+    """Set a new password for any user (admin only)"""
+    db_user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not db_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    if len(request.new_password) < 8:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 8 characters long"
+        )
+
+    if len(request.new_password.encode('utf-8')) > 72:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password cannot be longer than 72 bytes"
+        )
+
+    db_user.hashed_password = get_password_hash(request.new_password)
+    db.commit()
+
+    return {"message": "Password reset successfully"}
+
+
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(
     user_id: int,
