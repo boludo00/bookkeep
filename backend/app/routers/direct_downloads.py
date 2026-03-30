@@ -24,6 +24,7 @@ class DirectDownloadSettingsUpdate(BaseModel):
     enabled: bool = False
     annas_archive_enabled: bool = True
     annas_archive_mirror: Optional[str] = None
+    annas_archive_language: Optional[str] = None
     zlibrary_enabled: bool = False
     zlibrary_email: Optional[str] = None
     zlibrary_password: Optional[str] = None  # Only set if changing
@@ -38,6 +39,7 @@ class DirectDownloadSettingsResponse(BaseModel):
     enabled: bool
     annas_archive_enabled: bool
     annas_archive_mirror: Optional[str]
+    annas_archive_language: Optional[str]
     zlibrary_enabled: bool
     zlibrary_email: Optional[str]
     zlibrary_password_set: bool  # True if password is configured (don't expose actual password)
@@ -64,6 +66,7 @@ def _settings_to_response(settings: DirectDownloadSettings) -> DirectDownloadSet
         enabled=settings.enabled,
         annas_archive_enabled=settings.annas_archive_enabled,
         annas_archive_mirror=settings.annas_archive_mirror,
+        annas_archive_language=settings.annas_archive_language,
         zlibrary_enabled=settings.zlibrary_enabled,
         zlibrary_email=settings.zlibrary_email,
         zlibrary_password_set=bool(settings.zlibrary_password),  # Don't expose password
@@ -89,6 +92,7 @@ async def get_settings(current_user: models.User = Depends(require_admin), db: S
             enabled=False,
             annas_archive_enabled=True,
             annas_archive_mirror=None,
+            annas_archive_language=None,
             zlibrary_enabled=False,
             zlibrary_email=None,
             zlibrary_password_set=False,
@@ -119,6 +123,7 @@ async def update_settings(
             enabled=data.enabled,
             annas_archive_enabled=data.annas_archive_enabled,
             annas_archive_mirror=data.annas_archive_mirror,
+            annas_archive_language=data.annas_archive_language,
             zlibrary_enabled=data.zlibrary_enabled,
             zlibrary_email=data.zlibrary_email,
             zlibrary_password=data.zlibrary_password,
@@ -133,6 +138,7 @@ async def update_settings(
         settings.enabled = data.enabled
         settings.annas_archive_enabled = data.annas_archive_enabled
         settings.annas_archive_mirror = data.annas_archive_mirror
+        settings.annas_archive_language = data.annas_archive_language
         settings.zlibrary_enabled = data.zlibrary_enabled
         settings.zlibrary_email = data.zlibrary_email
         settings.zlibrary_domain = data.zlibrary_domain

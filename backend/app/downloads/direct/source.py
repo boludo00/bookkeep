@@ -64,6 +64,7 @@ class DirectDownloadSource(ReleaseSource):
             self._providers.append(
                 AnnasArchiveProvider(
                     mirror=settings.annas_archive_mirror,
+                    language=settings.annas_archive_language,
                     flaresolverr_url=flaresolverr_url,
                 )
             )

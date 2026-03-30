@@ -45,6 +45,7 @@ class AnnasArchiveProvider(DirectProvider):
     def __init__(
         self,
         mirror: Optional[str] = None,
+        language: Optional[str] = None,
         timeout: float = 30.0,
         flaresolverr_url: Optional[str] = None,
     ):
@@ -57,6 +58,7 @@ class AnnasArchiveProvider(DirectProvider):
             flaresolverr_url: Optional FlareSolverr URL for Cloudflare bypass
         """
         self.base_url = (mirror or self.DEFAULT_MIRROR).rstrip("/")
+        self.language = language
         self.timeout = timeout
         self.flaresolverr_url = flaresolverr_url
         self._client: Optional[httpx.AsyncClient] = None
@@ -146,11 +148,13 @@ class AnnasArchiveProvider(DirectProvider):
         try:
             # Build search URL using table display format
             ext_params = "&".join([f"ext={ext}" for ext in extensions[:4]])
+            lang_param = f"&lang={self.language}" if self.language else ""
             search_url = (
                 f"{mirror}/search?"
                 f"index=&page=1&display=table"
                 f"&acc=aa_download&acc=external_download"
                 f"&{ext_params}"
+                f"{lang_param}"
                 f"&q={quote_plus(query)}"
             )
 
