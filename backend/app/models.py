@@ -339,6 +339,7 @@ class DirectDownloadSettings(Base):
     # Anna's Archive settings
     annas_archive_enabled = Column(Boolean, default=True)
     annas_archive_mirror = Column(String, nullable=True)  # Optional custom mirror URL
+    annas_archive_language = Column(String, nullable=True)  # Language filter (e.g., "fr")
 
     # Z-Library settings
     zlibrary_enabled = Column(Boolean, default=False)

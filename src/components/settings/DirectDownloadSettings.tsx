@@ -14,6 +14,7 @@ interface DirectDownloadForm {
   enabled: boolean;
   annas_archive_enabled: boolean;
   annas_archive_mirror: string;
+  annas_archive_language: string;
   zlibrary_enabled: boolean;
   zlibrary_email: string;
   zlibrary_password: string;
@@ -41,6 +42,7 @@ export default function DirectDownloadSettings() {
     enabled: false,
     annas_archive_enabled: true,
     annas_archive_mirror: '',
+    annas_archive_language: '',
     zlibrary_enabled: false,
     zlibrary_email: '',
     zlibrary_password: '',
@@ -64,6 +66,7 @@ export default function DirectDownloadSettings() {
         enabled: settings.enabled,
         annas_archive_enabled: settings.annas_archive_enabled,
         annas_archive_mirror: settings.annas_archive_mirror || '',
+        annas_archive_language: settings.annas_archive_language || '',
         zlibrary_enabled: settings.zlibrary_enabled,
         zlibrary_email: settings.zlibrary_email || '',
         zlibrary_password: '', // Never populate from server
@@ -224,6 +227,22 @@ export default function DirectDownloadSettings() {
                   <p className="text-xs text-muted-foreground">
                     Leave blank to use the default mirror
                   </p>
+
+                  <div className="space-y-2 pt-2">
+                    <Label htmlFor="annas-lang" className="text-muted-foreground text-sm">
+                      Language Filter (optional)
+                    </Label>
+                    <Input
+                      id="annas-lang"
+                      value={form.annas_archive_language}
+                      onChange={(e) => setForm({ ...form, annas_archive_language: e.target.value })}
+                      placeholder="e.g. fr, en, es"
+                      className="bg-secondary border-border"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Use ISO 639-1 language codes (e.g., 'fr' for French, 'en' for English)
+                    </p>
+                  </div>
                 </div>
               )}
             </div>

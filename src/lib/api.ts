@@ -1099,6 +1099,7 @@ export interface DirectDownloadSettings {
   enabled: boolean;
   annas_archive_enabled: boolean;
   annas_archive_mirror: string | null;
+  annas_archive_language: string | null;
   zlibrary_enabled: boolean;
   zlibrary_email: string | null;
   zlibrary_password_set: boolean;
@@ -1123,6 +1124,7 @@ export const directDownloadApi = {
     enabled: boolean;
     annas_archive_enabled: boolean;
     annas_archive_mirror?: string;
+    annas_archive_language?: string;
     zlibrary_enabled: boolean;
     zlibrary_email?: string;
     zlibrary_password?: string;
