@@ -912,6 +912,13 @@ async def sync_from_audiobookshelf():
             media = item.get("media", {})
             metadata = media.get("metadata", {})
 
+            # Audiobookshelf reports per-item whether audio and/or ebook
+            # content actually exists -- don't assume every item is an
+            # audiobook just because it came from an Audiobookshelf sync.
+            has_audio = (media.get("numAudioFiles") or 0) > 0
+            has_ebook = bool(media.get("ebookFormat"))
+            item_formats = [f for f, present in (("audiobook", has_audio), ("ebook", has_ebook)) if present]
+
             title = metadata.get("title") or "Unknown Title"
             author = metadata.get("authorName") or "Unknown Author"
             isbn = metadata.get("isbn")
@@ -920,18 +927,22 @@ async def sync_from_audiobookshelf():
             if item_id:
                 existing_by_abs_id = db.query(Book).filter(Book.audiobookshelf_id == item_id).first()
                 if existing_by_abs_id:
-                    existing_by_abs_id.audiobook_available = True
+                    if has_audio:
+                        existing_by_abs_id.audiobook_available = True
+                    if has_ebook:
+                        existing_by_abs_id.ebook_available = True
                     existing_by_abs_id.last_refreshed = datetime.now(timezone.utc)
                     db.add(existing_by_abs_id)
 
-                    existing_request = db.query(BookRequest).filter(
+                    existing_requests = db.query(BookRequest).filter(
                         BookRequest.book_id == existing_by_abs_id.id,
-                        BookRequest.format == "audiobook"
-                    ).first()
-                    if existing_request and existing_request.status in ("processing", "approved", "pending"):
-                        existing_request.status = "available"
-                        existing_request.updated_at = datetime.now(timezone.utc)
-                        updated_count += 1
+                        BookRequest.format.in_(item_formats)
+                    ).all() if item_formats else []
+                    for existing_request in existing_requests:
+                        if existing_request.status in ("processing", "approved", "pending"):
+                            existing_request.status = "available"
+                            existing_request.updated_at = datetime.now(timezone.utc)
+                            updated_count += 1
 
                     try:
                         db.commit()
@@ -1016,7 +1027,8 @@ async def sync_from_audiobookshelf():
                                     ratings_count=hardcover_data.get("ratings_count"),
                                     users_count=hardcover_data.get("users_count"),
                                     genres=genres or None,
-                                    audiobook_available=True,
+                                    audiobook_available=has_audio,
+                                    ebook_available=has_ebook,
                                 )
                                 db.add(db_book)
                                 try:
@@ -1043,21 +1055,25 @@ async def sync_from_audiobookshelf():
             # Update existing book
             if item_id:
                 db_book.audiobookshelf_id = item_id
-            db_book.audiobook_available = True
+            if has_audio:
+                db_book.audiobook_available = True
+            if has_ebook:
+                db_book.ebook_available = True
             db_book.last_refreshed = datetime.now(timezone.utc)
             db.add(db_book)
             books_updated += 1
 
             # Update matching requests
-            existing_request = db.query(BookRequest).filter(
+            existing_requests = db.query(BookRequest).filter(
                 BookRequest.book_id == db_book.id,
-                BookRequest.format == "audiobook"
-            ).first()
+                BookRequest.format.in_(item_formats)
+            ).all() if item_formats else []
 
-            if existing_request and existing_request.status in ("processing", "approved", "pending"):
-                existing_request.status = "available"
-                existing_request.updated_at = datetime.now(timezone.utc)
-                updated_count += 1
+            for existing_request in existing_requests:
+                if existing_request.status in ("processing", "approved", "pending"):
+                    existing_request.status = "available"
+                    existing_request.updated_at = datetime.now(timezone.utc)
+                    updated_count += 1
 
             try:
                 db.commit()
