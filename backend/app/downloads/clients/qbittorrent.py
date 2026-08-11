@@ -440,8 +440,22 @@ class QBittorrentClient:
                 logger.error("qbittorrent_no_torrent_source")
                 return None
 
-            # qBittorrent returns "Ok." on success
-            if result != "Ok.":
+            # Older qBittorrent/qbittorrent-api versions return the plain
+            # string "Ok." on success. Newer qBittorrent servers (5.1+, this
+            # instance runs 5.2.3) return a structured TorrentsAddedMetadata
+            # object instead - checking only for the literal string silently
+            # treated every genuine success as a failure once the server was
+            # upgraded.
+            if result == "Ok.":
+                pass  # legacy success response
+            elif hasattr(result, "success_count"):
+                added_ok = (getattr(result, "success_count", 0) or 0) > 0
+                if info_hash and getattr(result, "added_torrent_ids", None):
+                    added_ok = added_ok or info_hash in result.added_torrent_ids
+                if not added_ok:
+                    logger.warning("qbittorrent_add_unexpected_response", result=result)
+                    return None
+            else:
                 logger.warning("qbittorrent_add_unexpected_response", result=result)
                 return None
 
