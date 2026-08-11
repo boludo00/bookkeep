@@ -4,6 +4,7 @@ Prowlarr release source implementation.
 Searches for book releases via Prowlarr and returns standardized Release objects.
 """
 import re
+import urllib.parse
 from typing import List, Optional
 import structlog
 
@@ -19,6 +20,18 @@ from .utils import (
 )
 
 logger = structlog.get_logger()
+
+
+def _build_magnet_from_hash(info_hash, title=None):
+    """Build a plain magnet URI from Prowlarr's infoHash field. More reliable
+    than trusting the downloadUrl/magnetUrl field names - both can actually be
+    Prowlarr proxy links (http://.../download?...) rather than a real magnet:
+    URI or direct file, depending on indexer. infoHash is the one field that's
+    consistently the raw torrent hash, not a proxy redirect."""
+    if not info_hash:
+        return None
+    dn = urllib.parse.quote(title) if title else ''
+    return f'magnet:?xt=urn:btih:{info_hash}' + (f'&dn={dn}' if dn else '')
 
 
 @register_source("prowlarr")
@@ -122,8 +135,18 @@ class ProwlarrSource(ReleaseSource):
 
             if results:
                 # Add only unique results (by download URL)
+                # Prowlarr results are either direct-download (downloadUrl) or
+                # magnet-link (magnetUrl) depending on indexer/protocol - most
+                # public torrent indexers (e.g. Pirate Bay via Prowlarr) only
+                # populate magnetUrl, so downloadUrl alone silently drops them.
                 for result in results:
-                    url = result.get("downloadUrl", "")
+                    # Build a real magnet URI from infoHash when available - both
+                    # downloadUrl AND magnetUrl can be Prowlarr proxy redirect
+                    # links depending on indexer, not the raw magnet/file URL
+                    # their names imply.
+                    url = (_build_magnet_from_hash(result.get("infoHash"), result.get("title"))
+                           or result.get("magnetUrl")
+                           or result.get("downloadUrl", ""))
                     if url and url not in seen_urls:
                         seen_urls.add(url)
                         all_results.append(result)
@@ -184,7 +207,9 @@ class ProwlarrSource(ReleaseSource):
         if not title:
             return None
 
-        download_url = prowlarr_result.get("downloadUrl", "")
+        download_url = (_build_magnet_from_hash(prowlarr_result.get("infoHash"), prowlarr_result.get("title"))
+                        or prowlarr_result.get("magnetUrl")
+                        or prowlarr_result.get("downloadUrl", ""))
         if not download_url:
             return None
 
