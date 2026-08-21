@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
-import { Search, Clock, Star, BookOpen, ArrowLeft } from 'lucide-react';
+import { Search, Clock, Star, BookOpen, Headphones, ArrowLeft } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { hardcoverApi } from '@/lib/api';
+import { hardcoverApi, booksApi } from '@/lib/api';
 import { transformHardcoverBook } from '@/lib/hardcover';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -25,6 +25,29 @@ export default function SearchResults() {
   const books: Book[] = searchData?.books
     ? searchData.books.map(transformHardcoverBook)
     : [];
+
+  const { data: libraryBooks = [] } = useQuery({
+    queryKey: ['books', 'library-availability'],
+    queryFn: () => booksApi.getAll(0, 1000),
+    staleTime: 60 * 1000,
+  });
+
+  const getAvailability = (book: Book) => {
+    const libraryBook = libraryBooks.find((item: any) =>
+      (book.hardcoverId && item.hardcover_id === book.hardcoverId) ||
+      (book.isbn && item.isbn === book.isbn)
+    );
+
+    return {
+      ebook: Boolean(libraryBook?.ebook_available),
+      audiobook: Boolean(libraryBook?.audiobook_available),
+    };
+  };
+
+  const requestAvailability = requestBook
+    ? getAvailability(requestBook)
+    : { ebook: false, audiobook: false };
+
   const series = searchData?.series || [];
   const authors = searchData?.authors || [];
 
@@ -121,7 +144,7 @@ export default function SearchResults() {
                         )}
                       </div>
                       <ArrowLeft className="h-4 w-4 text-muted-foreground rotate-180" />
-                    </Link>
+                    </Link> 
                   ))}
                 </div>
               </section>
@@ -154,7 +177,18 @@ export default function SearchResults() {
               <section>
                 <h2 className="text-lg font-semibold text-foreground mb-4">Books</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {books.map((book) => (
+                  {books.map((book) => {
+                    const availability = getAvailability(book);
+                    const allFormatsAvailable =
+                      availability.ebook && availability.audiobook;
+
+                    const requestLabel = availability.ebook
+                      ? 'Request Audiobook'
+                      : availability.audiobook
+                        ? 'Request eBook'
+                        : 'Request Book';
+
+                    return (
                     <div
                       key={book.id}
                       className="group relative flex gap-4 p-4 rounded-lg border border-border bg-card hover:bg-accent/50 transition-colors"
@@ -237,7 +271,27 @@ export default function SearchResults() {
                           </p>
                         )}
 
+                        {/* Library availability */}
+                        {(availability.ebook || availability.audiobook) && (
+                          <div className="flex flex-wrap gap-2 pt-1">
+                            {availability.ebook && (
+                              <Badge className="bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 hover:bg-emerald-500/15">
+                                <BookOpen className="h-3 w-3 mr-1" />
+                                eBook Available
+                              </Badge>
+                            )}
+
+                            {availability.audiobook && (
+                              <Badge className="bg-violet-500/15 text-violet-500 border border-violet-500/30 hover:bg-violet-500/15">
+                                <Headphones className="h-3 w-3 mr-1" />
+                                Audiobook Available
+                              </Badge>
+                            )}
+                          </div>
+                        )}
+
                         {/* Request Button */}
+                        {!allFormatsAvailable && (
                         <Button
                           variant="outline"
                           size="sm"
@@ -245,11 +299,13 @@ export default function SearchResults() {
                           className="w-full mt-2"
                         >
                           <Clock className="h-4 w-4 mr-2" />
-                          Request Book
+                          {requestLabel}
                         </Button>
+                        )}
                       </div>
                     </div>
-                  ))}
+		    );
+                  })}
                 </div>
               </section>
             )}
@@ -263,6 +319,17 @@ export default function SearchResults() {
           book={requestBook}
           open={!!requestBook}
           onOpenChange={(open) => !open && setRequestBook(null)}
+          preferredFormat={
+            requestAvailability.ebook
+              ? 'audiobook'
+              : requestAvailability.audiobook
+                ? 'ebook'
+                : undefined
+          }
+          disableFormats={{
+            ebook: requestAvailability.ebook,
+            audiobook: requestAvailability.audiobook,
+          }}
         />
       )}
     </>
