@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { RequestDialog } from '@/components/books/RequestDialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatRating } from '@/lib/utils';
+import { getLibraryAvailability } from '@/lib/libraryAvailability';
 import type { Book } from '@/types/book';
 
 export default function SearchResults() {
@@ -32,17 +33,8 @@ export default function SearchResults() {
     staleTime: 60 * 1000,
   });
 
-  const getAvailability = (book: Book) => {
-    const libraryBook = libraryBooks.find((item: any) =>
-      (book.hardcoverId && item.hardcover_id === book.hardcoverId) ||
-      (book.isbn && item.isbn === book.isbn)
-    );
-
-    return {
-      ebook: Boolean(libraryBook?.ebook_available),
-      audiobook: Boolean(libraryBook?.audiobook_available),
-    };
-  };
+  const getAvailability = (book: Book) =>
+  getLibraryAvailability(book, libraryBooks);
 
   const requestAvailability = requestBook
     ? getAvailability(requestBook)

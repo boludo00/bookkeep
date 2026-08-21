@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { RequestDialog } from '@/components/books/RequestDialog';
 import { useQuery } from '@tanstack/react-query';
 import { requestsApi, booksApi } from '@/lib/api';
+import { getLibraryAvailability } from '@/lib/libraryAvailability';
 import type { Book } from '@/types/book';
 
 interface BookCardProps {
@@ -41,15 +42,14 @@ export const BookCard = memo(function BookCard({
     staleTime: 60 * 1000,
   });
 
-  const libraryBook = libraryBooks.find((item: any) =>
-    (book.hardcoverId && item.hardcover_id === book.hardcoverId) ||
-    (book.isbn && item.isbn === book.isbn)
-  );
+ 
+  const libraryAvailability = getLibraryAvailability(book, libraryBooks);
 
   const ebookAvailable =
-    book.ebookAvailable || Boolean(libraryBook?.ebook_available);
+  book.ebookAvailable || libraryAvailability.ebook;
+
   const audiobookAvailable =
-    book.audiobookAvailable || Boolean(libraryBook?.audiobook_available);
+  book.audiobookAvailable || libraryAvailability.audiobook;
 
   const isAnyFormatAvailable = ebookAvailable || audiobookAvailable;
   const allFormatsAvailable = ebookAvailable && audiobookAvailable;
