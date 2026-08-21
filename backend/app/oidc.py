@@ -19,11 +19,17 @@ OIDC_SETTING_KEYS = [
     "oidc_redirect_uri",
     "oidc_auto_register",
     "oidc_button_text",
+    "oidc_default_can_download",
+    "oidc_default_auto_approve_ebooks",
+    "oidc_default_auto_approve_audiobooks",
 ]
 
 OIDC_DEFAULTS = {
     "oidc_auto_register": "true",
     "oidc_button_text": "Sign in with SSO",
+    "oidc_default_can_download": "false",
+    "oidc_default_auto_approve_ebooks": "false",
+    "oidc_default_auto_approve_audiobooks": "false",
 }
 
 

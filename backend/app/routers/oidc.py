@@ -275,6 +275,17 @@ async def oidc_callback(
             return RedirectResponse(url="/login?error=registration_disabled", status_code=302)
 
         username = preferred_username or f"user_{secrets.token_hex(4)}"
+
+        default_can_download = (
+            (_get_oidc_value(db, "oidc_default_can_download") or "false").lower() == "true"
+        )
+        default_auto_approve_ebooks = (
+            (_get_oidc_value(db, "oidc_default_auto_approve_ebooks") or "false").lower() == "true"
+        )
+        default_auto_approve_audiobooks = (
+            (_get_oidc_value(db, "oidc_default_auto_approve_audiobooks") or "false").lower() == "true"
+        )
+
         for attempt in range(3):
             try:
                 existing = db.query(User).filter(User.username == username).first()
@@ -289,6 +300,9 @@ async def oidc_callback(
                     oidc_subject=sub,
                     is_active=True,
                     is_admin=False,
+                    can_download=default_can_download,
+                    auto_approve_ebooks=default_auto_approve_ebooks,
+                    auto_approve_audiobooks=default_auto_approve_audiobooks,
                 )
                 db.add(user)
                 db.commit()

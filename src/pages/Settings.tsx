@@ -162,6 +162,9 @@ function OidcSettingsCard() {
     oidc_redirect_uri: '',
     oidc_auto_register: 'true',
     oidc_button_text: 'Sign in with SSO',
+    oidc_default_can_download: 'false',
+    oidc_default_auto_approve_ebooks: 'false',
+    oidc_default_auto_approve_audiobooks: 'false',
   });
 
   const { data: oidcSettings, isLoading: loadingOidc } = useQuery({
@@ -178,6 +181,9 @@ function OidcSettingsCard() {
         oidc_redirect_uri: oidcSettings.oidc_redirect_uri.value || '',
         oidc_auto_register: oidcSettings.oidc_auto_register.value || 'true',
         oidc_button_text: oidcSettings.oidc_button_text.value || 'Sign in with SSO',
+        oidc_default_can_download: oidcSettings.oidc_default_can_download.value || 'false',
+        oidc_default_auto_approve_ebooks: oidcSettings.oidc_default_auto_approve_ebooks.value || 'false',
+        oidc_default_auto_approve_audiobooks: oidcSettings.oidc_default_auto_approve_audiobooks.value || 'false',
       });
     }
   }, [oidcSettings]);
@@ -222,6 +228,15 @@ function OidcSettingsCard() {
     }
     if (oidcSettings?.oidc_button_text.source !== 'env') {
       payload.oidc_button_text = formData.oidc_button_text;
+    }
+    if (oidcSettings?.oidc_default_can_download.source !== 'env') {
+      payload.oidc_default_can_download = formData.oidc_default_can_download;
+    }
+    if (oidcSettings?.oidc_default_auto_approve_ebooks.source !== 'env') {
+      payload.oidc_default_auto_approve_ebooks = formData.oidc_default_auto_approve_ebooks;
+    }
+    if (oidcSettings?.oidc_default_auto_approve_audiobooks.source !== 'env') {
+      payload.oidc_default_auto_approve_audiobooks = formData.oidc_default_auto_approve_audiobooks;
     }
     if (Object.keys(payload).length > 0) {
       saveMutation.mutate(payload);
@@ -376,6 +391,96 @@ function OidcSettingsCard() {
             />
           </div>
         </div>
+
+        {formData.oidc_auto_register === 'true' && (
+          <div className="space-y-4 rounded-lg border border-border p-4">
+            <div>
+              <Label className="text-foreground font-medium">
+                Default permissions for auto-registered users
+              </Label>
+              <p className="text-xs text-muted-foreground mt-1">
+                Applied only when a new user account is created through OIDC.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+              <div className="flex items-center justify-between gap-4 rounded-lg border border-border p-3">
+                <div className="space-y-0.5">
+                  <Label
+                    htmlFor="oidc-default-can-download"
+                    className="text-foreground"
+                  >
+                    Can Download
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Allow direct searching and downloads
+                  </p>
+                </div>
+                <Switch
+                  id="oidc-default-can-download"
+                  checked={formData.oidc_default_can_download === 'true'}
+                  onCheckedChange={(checked) =>
+                    setFormData(prev => ({
+                      ...prev,
+                      oidc_default_can_download: checked ? 'true' : 'false',
+                    }))
+                  }
+                  disabled={isFieldLocked('oidc_default_can_download')}
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-4 rounded-lg border border-border p-3">
+                <div className="space-y-0.5">
+                  <Label
+                    htmlFor="oidc-default-auto-approve-ebooks"
+                    className="text-foreground"
+                  >
+                    Auto-Approve eBooks
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Automatically approve ebook requests
+                  </p>
+                </div>
+                <Switch
+                  id="oidc-default-auto-approve-ebooks"
+                  checked={formData.oidc_default_auto_approve_ebooks === 'true'}
+                  onCheckedChange={(checked) =>
+                    setFormData(prev => ({
+                      ...prev,
+                      oidc_default_auto_approve_ebooks: checked ? 'true' : 'false',
+                    }))
+                  }
+                  disabled={isFieldLocked('oidc_default_auto_approve_ebooks')}
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-4 rounded-lg border border-border p-3">
+                <div className="space-y-0.5">
+                  <Label
+                    htmlFor="oidc-default-auto-approve-audiobooks"
+                    className="text-foreground"
+                  >
+                    Auto-Approve Audiobooks
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Automatically approve audiobook requests
+                  </p>
+                </div>
+                <Switch
+                  id="oidc-default-auto-approve-audiobooks"
+                  checked={formData.oidc_default_auto_approve_audiobooks === 'true'}
+                  onCheckedChange={(checked) =>
+                    setFormData(prev => ({
+                      ...prev,
+                      oidc_default_auto_approve_audiobooks: checked ? 'true' : 'false',
+                    }))
+                  }
+                  disabled={isFieldLocked('oidc_default_auto_approve_audiobooks')}
+                />
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="flex justify-between pt-2">
           <Button
