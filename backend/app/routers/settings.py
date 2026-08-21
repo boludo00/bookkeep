@@ -254,6 +254,9 @@ class OidcSettingsResponse(BaseModel):
     oidc_redirect_uri: OidcSettingField
     oidc_auto_register: OidcSettingField
     oidc_button_text: OidcSettingField
+    oidc_default_can_download: OidcSettingField
+    oidc_default_auto_approve_ebooks: OidcSettingField
+    oidc_default_auto_approve_audiobooks: OidcSettingField
 
 class OidcSettingsUpdate(BaseModel):
     oidc_issuer_url: Optional[str] = None
@@ -262,6 +265,9 @@ class OidcSettingsUpdate(BaseModel):
     oidc_redirect_uri: Optional[str] = None
     oidc_auto_register: Optional[str] = None
     oidc_button_text: Optional[str] = None
+    oidc_default_can_download: Optional[str] = None
+    oidc_default_auto_approve_ebooks: Optional[str] = None
+    oidc_default_auto_approve_audiobooks: Optional[str] = None
 
 @router.get("/oidc", response_model=OidcSettingsResponse)
 async def get_oidc_settings_endpoint(

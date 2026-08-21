@@ -464,6 +464,9 @@ export interface OidcSettingsResponse {
   oidc_redirect_uri: OidcSettingField;
   oidc_auto_register: OidcSettingField;
   oidc_button_text: OidcSettingField;
+  oidc_default_can_download: OidcSettingField;
+  oidc_default_auto_approve_ebooks: OidcSettingField;
+  oidc_default_auto_approve_audiobooks: OidcSettingField;
 }
 
 // Auth API endpoints
