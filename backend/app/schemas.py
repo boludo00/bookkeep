@@ -196,6 +196,11 @@ class HardcoverTag(BaseModel):
 class HardcoverTagging(BaseModel):
     tag: HardcoverTag
 
+class HardcoverEditionIdentifier(BaseModel):
+    isbn_10: Optional[str] = None
+    isbn_13: Optional[str] = None
+
+
 class HardcoverBook(BaseModel):
     id: int
     title: str
@@ -215,6 +220,7 @@ class HardcoverBook(BaseModel):
     default_physical_edition_id: Optional[int] = None
     default_ebook_edition_id: Optional[int] = None
     default_audio_edition_id: Optional[int] = None
+    editions: Optional[List[HardcoverEditionIdentifier]] = None
     book_series: Optional[List[HardcoverBookSeries]] = None
     contributions: Optional[List[HardcoverContribution]] = None
     taggings: Optional[List[HardcoverTagging]] = None

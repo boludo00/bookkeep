@@ -881,7 +881,7 @@ async def sync_from_audiobookshelf():
     - Marks matching requests as "available"
     """
     from app.routers.audiobookshelf import get_default_audiobookshelf_server, get_all_audiobookshelf_items
-    from app.routers.hardcover import lookup_book_by_title_author
+    from app.routers.hardcover import lookup_book_by_isbn, lookup_book_by_title_author
     from app.models import BookRequest, User
 
     db: Session = SessionLocal()
@@ -912,26 +912,50 @@ async def sync_from_audiobookshelf():
             media = item.get("media", {})
             metadata = media.get("metadata", {})
 
+            # Audiobookshelf reports per-item whether audio and/or ebook
+            # content actually exists -- don't assume every item is an
+            # audiobook just because it came from an Audiobookshelf sync.
+            has_audio = (media.get("numAudioFiles") or 0) > 0
+            has_ebook = bool(media.get("ebookFormat"))
+            item_formats = [f for f, present in (("audiobook", has_audio), ("ebook", has_ebook)) if present]
+
             title = metadata.get("title") or "Unknown Title"
             author = metadata.get("authorName") or "Unknown Author"
             isbn = metadata.get("isbn")
+
+            published_year = None
+            published_value = (
+                metadata.get("publishedYear")
+                or metadata.get("publishedDate")
+            )
+            if published_value:
+                try:
+                    year_text = str(published_value).strip()[:4]
+                    if len(year_text) == 4 and year_text.isdigit():
+                        published_year = int(year_text)
+                except (TypeError, ValueError):
+                    published_year = None
 
             # Fast path: already linked by audiobookshelf_id
             if item_id:
                 existing_by_abs_id = db.query(Book).filter(Book.audiobookshelf_id == item_id).first()
                 if existing_by_abs_id:
-                    existing_by_abs_id.audiobook_available = True
+                    if has_audio:
+                        existing_by_abs_id.audiobook_available = True
+                    if has_ebook:
+                        existing_by_abs_id.ebook_available = True
                     existing_by_abs_id.last_refreshed = datetime.now(timezone.utc)
                     db.add(existing_by_abs_id)
 
-                    existing_request = db.query(BookRequest).filter(
+                    existing_requests = db.query(BookRequest).filter(
                         BookRequest.book_id == existing_by_abs_id.id,
-                        BookRequest.format == "audiobook"
-                    ).first()
-                    if existing_request and existing_request.status in ("processing", "approved", "pending"):
-                        existing_request.status = "available"
-                        existing_request.updated_at = datetime.now(timezone.utc)
-                        updated_count += 1
+                        BookRequest.format.in_(item_formats)
+                    ).all() if item_formats else []
+                    for existing_request in existing_requests:
+                        if existing_request.status in ("processing", "approved", "pending"):
+                            existing_request.status = "available"
+                            existing_request.updated_at = datetime.now(timezone.utc)
+                            updated_count += 1
 
                     try:
                         db.commit()
@@ -954,16 +978,58 @@ async def sync_from_audiobookshelf():
                     sa_func.lower(Book.author) == author.lower()
                 ).first()
 
-            # Try Hardcover lookup by title+author
+            # Try Hardcover ISBN resolution first when ABS supplies an ISBN.
+            # A genuine no-match may fall through to title matching.
+            # API/rate-limit failures skip this item until a future sync.
+            hardcover_data = None
+
+            if not db_book and isbn:
+                try:
+                    hardcover_data = await lookup_book_by_isbn(
+                        isbn,
+                        db
+                    )
+                    await asyncio.sleep(0.5)
+
+                    if hardcover_data:
+                        logger.info(
+                            "audiobookshelf_hardcover_isbn_match",
+                            isbn=isbn,
+                            title=title,
+                            hardcover_id=hardcover_data.get("id"),
+                            hardcover_title=hardcover_data.get("title"),
+                        )
+
+                except Exception as e:
+                    logger.warning(
+                        "audiobookshelf_hardcover_isbn_deferred",
+                        isbn=isbn,
+                        title=title,
+                        reason="api_failure",
+                        error=str(e),
+                    )
+                    skipped_count += 1
+                    continue
+
+            # Only use title/author/year matching when there was no ISBN
+            # or Hardcover definitively returned no ISBN match.
             if not db_book:
                 try:
-                    hardcover_data = await lookup_book_by_title_author(title, author, db)
-                    await asyncio.sleep(0.5)
+                    if not hardcover_data:
+                        hardcover_data = await lookup_book_by_title_author(
+                            title,
+                            author,
+                            published_year,
+                            db
+                        )
+                        await asyncio.sleep(0.5)
 
                     if hardcover_data:
                         hardcover_id_int = hardcover_data.get("id")
                         if hardcover_id_int:
-                            db_book = db.query(Book).filter(Book.hardcover_id == hardcover_id_int).first()
+                            db_book = db.query(Book).filter(
+                                Book.hardcover_id == hardcover_id_int
+                            ).first()
 
                             if not db_book:
                                 # Create new book from Hardcover data
@@ -990,13 +1056,21 @@ async def sync_from_audiobookshelf():
                                 # Contributors
                                 contributions = hardcover_data.get("contributions", [])
                                 if contributions:
-                                    author_names = [c.get("author", {}).get("name") for c in contributions if c.get("author", {}).get("name")]
+                                    author_names = [
+                                        c.get("author", {}).get("name")
+                                        for c in contributions
+                                        if c.get("author", {}).get("name")
+                                    ]
                                     if author_names:
                                         author = ", ".join(author_names)
 
                                 # Genres
                                 taggings = hardcover_data.get("taggings", [])
-                                genres = ", ".join([t.get("tag", {}).get("tag", "") for t in taggings if t.get("tag", {}).get("tag")])
+                                genres = ", ".join([
+                                    t.get("tag", {}).get("tag", "")
+                                    for t in taggings
+                                    if t.get("tag", {}).get("tag")
+                                ])
 
                                 db_book = Book(
                                     title=title,
@@ -1016,25 +1090,39 @@ async def sync_from_audiobookshelf():
                                     ratings_count=hardcover_data.get("ratings_count"),
                                     users_count=hardcover_data.get("users_count"),
                                     genres=genres or None,
-                                    audiobook_available=True,
+                                    audiobook_available=has_audio,
+                                    ebook_available=has_ebook,
                                 )
                                 db.add(db_book)
+
                                 try:
                                     db.flush()
                                     books_created += 1
-                                    logger.info("audiobookshelf_book_created",
-                                              hardcover_id=hardcover_id_int,
-                                              title=title)
+                                    logger.info(
+                                        "audiobookshelf_book_created",
+                                        hardcover_id=hardcover_id_int,
+                                        title=title
+                                    )
                                 except Exception as flush_error:
                                     db.rollback()
-                                    logger.warning("audiobookshelf_book_create_failed",
-                                                 title=title,
-                                                 error=str(flush_error))
+                                    logger.warning(
+                                        "audiobookshelf_book_create_failed",
+                                        title=title,
+                                        error=str(flush_error)
+                                    )
                                     continue
+
                 except Exception as e:
-                    logger.warning("audiobookshelf_hardcover_lookup_failed",
-                                 title=title,
-                                 error=str(e))
+                    logger.warning(
+                        "audiobookshelf_hardcover_lookup_deferred",
+                        title=title,
+                        author=author,
+                        published_year=published_year,
+                        reason="api_failure",
+                        error=str(e),
+                    )
+                    skipped_count += 1
+                    continue
 
             if not db_book:
                 skipped_count += 1
@@ -1043,21 +1131,25 @@ async def sync_from_audiobookshelf():
             # Update existing book
             if item_id:
                 db_book.audiobookshelf_id = item_id
-            db_book.audiobook_available = True
+            if has_audio:
+                db_book.audiobook_available = True
+            if has_ebook:
+                db_book.ebook_available = True
             db_book.last_refreshed = datetime.now(timezone.utc)
             db.add(db_book)
             books_updated += 1
 
             # Update matching requests
-            existing_request = db.query(BookRequest).filter(
+            existing_requests = db.query(BookRequest).filter(
                 BookRequest.book_id == db_book.id,
-                BookRequest.format == "audiobook"
-            ).first()
+                BookRequest.format.in_(item_formats)
+            ).all() if item_formats else []
 
-            if existing_request and existing_request.status in ("processing", "approved", "pending"):
-                existing_request.status = "available"
-                existing_request.updated_at = datetime.now(timezone.utc)
-                updated_count += 1
+            for existing_request in existing_requests:
+                if existing_request.status in ("processing", "approved", "pending"):
+                    existing_request.status = "available"
+                    existing_request.updated_at = datetime.now(timezone.utc)
+                    updated_count += 1
 
             try:
                 db.commit()

@@ -5,7 +5,8 @@ import { cn, formatRating } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { RequestDialog } from '@/components/books/RequestDialog';
 import { useQuery } from '@tanstack/react-query';
-import { requestsApi } from '@/lib/api';
+import { requestsApi, booksApi } from '@/lib/api';
+import { getLibraryAvailability } from '@/lib/libraryAvailability';
 import type { Book } from '@/types/book';
 
 interface BookCardProps {
@@ -35,9 +36,35 @@ export const BookCard = memo(function BookCard({
     enabled: enableRequestStatus && !!book.hardcoverId,
     staleTime: 60 * 1000,
   });
-  const ebookAvailable = book.ebookAvailable || false;
-  const audiobookAvailable = book.audiobookAvailable || false;
+  const { data: libraryBooks = [] } = useQuery({
+    queryKey: ['books', 'library-availability'],
+    queryFn: () => booksApi.getAll(0, 1000),
+    staleTime: 60 * 1000,
+  });
+
+ 
+  const libraryAvailability = getLibraryAvailability(book, libraryBooks);
+
+  const ebookAvailable =
+  book.ebookAvailable || libraryAvailability.ebook;
+
+  const audiobookAvailable =
+  book.audiobookAvailable || libraryAvailability.audiobook;
+
   const isAnyFormatAvailable = ebookAvailable || audiobookAvailable;
+  const allFormatsAvailable = ebookAvailable && audiobookAvailable;
+
+  const requestLabel = ebookAvailable
+    ? 'Request Audiobook'
+    : audiobookAvailable
+      ? 'Request eBook'
+      : 'Request';
+
+  const preferredFormat = ebookAvailable
+    ? 'audiobook'
+    : audiobookAvailable
+      ? 'ebook'
+      : undefined;
   const statusSource = requestStatus || (enableRequestStatus ? existingRequests : null);
   const requestStatuses = statusSource
     ? [statusSource.ebook, statusSource.audiobook].filter((value): value is string => !!value)
@@ -72,7 +99,7 @@ export const BookCard = memo(function BookCard({
 
               {/* Format availability badges */}
               {isAnyFormatAvailable && (
-                <div className="absolute top-2.5 right-2.5 flex gap-1.5">
+                <div className="absolute bottom-2.5 right-2.5 flex gap-1.5">
                   {ebookAvailable && (
                     <div
                       className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/90 text-white shadow-lg shadow-emerald-500/30"
@@ -135,7 +162,7 @@ export const BookCard = memo(function BookCard({
         </Link>
 
         {/* Request button */}
-        {!isAnyFormatAvailable && showRequestButton && (
+        {!allFormatsAvailable && showRequestButton && (
           <div className="absolute bottom-3 right-3 translate-y-2 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-[transform,opacity] duration-300">
             <Button
               size="sm"
@@ -147,13 +174,22 @@ export const BookCard = memo(function BookCard({
               }}
               disabled={!book.hardcoverId || hasActiveRequest}
             >
-              Request
+              {requestLabel}
             </Button>
           </div>
         )}
       </div>
       {book.hardcoverId && showRequestButton && (
-        <RequestDialog book={book} open={requestOpen} onOpenChange={setRequestOpen} />
+        <RequestDialog
+          book={book}
+          open={requestOpen}
+          onOpenChange={setRequestOpen}
+          preferredFormat={preferredFormat}
+          disableFormats={{
+            ebook: ebookAvailable,
+            audiobook: audiobookAvailable,
+          }}
+        />
       )}
     </>
   );

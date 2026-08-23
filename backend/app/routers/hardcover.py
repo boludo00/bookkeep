@@ -152,38 +152,99 @@ def _sample_response(data: dict, max_items: int = 3) -> dict:
     return sampled
 
 
+def _normalize_isbn(value: Optional[str]) -> Optional[str]:
+    """Normalize ISBN values for reliable comparison."""
+    if not value:
+        return None
+
+    normalized = "".join(
+        char for char in str(value).upper()
+        if char.isdigit() or char == "X"
+    )
+
+    return normalized or None
+
+
 def _enrich_books_with_availability(books: list, db: Session) -> list:
-    """Enrich a list of HardcoverBook objects with local availability data from database"""
+    """
+    Enrich Hardcover books with local availability.
+
+    Matching priority:
+    - Exact Hardcover book ID
+    - ISBN from any Hardcover edition
+
+    Availability is combined across all matching local records.
+    """
     if not books:
         return books
-    
-    # Get all hardcover IDs from the books
-    hardcover_ids = [book.id for book in books if book.id]
-    
-    if not hardcover_ids:
-        return books
-    
-    # Query local database for availability in one batch
-    local_books = db.query(Book).filter(Book.hardcover_id.in_(hardcover_ids)).all()
-    
-    # Create a map of hardcover_id -> (ebook_available, audiobook_available)
-    availability_map = {
-        book.hardcover_id: (book.ebook_available, book.audiobook_available)
-        for book in local_books
-    }
-    
-    # Enrich each book with availability data
-    enriched_books = []
-    for book in books:
-        availability = availability_map.get(book.id, (False, False))
-        # Create a new book with updated availability
-        book_dict = book.model_dump()
-        book_dict['ebook_available'] = availability[0]
-        book_dict['audiobook_available'] = availability[1]
-        enriched_books.append(schemas.HardcoverBook.model_validate(book_dict))
-    
-    return enriched_books
 
+    hardcover_ids = {book.id for book in books if book.id}
+
+    local_books = db.query(Book).filter(
+        or_(
+            Book.hardcover_id.in_(hardcover_ids),
+            Book.isbn.isnot(None),
+        )
+    ).all()
+
+    by_hardcover_id = {}
+    by_isbn = {}
+
+    for local_book in local_books:
+        if local_book.hardcover_id:
+            by_hardcover_id.setdefault(
+                local_book.hardcover_id, []
+            ).append(local_book)
+
+        normalized_isbn = _normalize_isbn(local_book.isbn)
+        if normalized_isbn:
+            by_isbn.setdefault(
+                normalized_isbn, []
+            ).append(local_book)
+
+    enriched_books = []
+
+    for book in books:
+        matches = []
+        seen_ids = set()
+
+        # Strongest match: exact Hardcover book ID.
+        for local_book in by_hardcover_id.get(book.id, []):
+            if local_book.id not in seen_ids:
+                matches.append(local_book)
+                seen_ids.add(local_book.id)
+
+        # Also match ISBNs from every Hardcover edition of this work.
+        for edition in book.editions or []:
+            for isbn in (edition.isbn_10, edition.isbn_13):
+                normalized = _normalize_isbn(isbn)
+                if not normalized:
+                    continue
+
+                for local_book in by_isbn.get(normalized, []):
+                    if local_book.id not in seen_ids:
+                        matches.append(local_book)
+                        seen_ids.add(local_book.id)
+
+        ebook_available = any(
+            bool(local_book.ebook_available)
+            for local_book in matches
+        )
+
+        audiobook_available = any(
+            bool(local_book.audiobook_available)
+            for local_book in matches
+        )
+
+        book_dict = book.model_dump()
+        book_dict["ebook_available"] = ebook_available
+        book_dict["audiobook_available"] = audiobook_available
+
+        enriched_books.append(
+            schemas.HardcoverBook.model_validate(book_dict)
+        )
+
+    return enriched_books
 
 def _parse_hardcover_book(book_data: dict) -> schemas.HardcoverBook:
     """Safely parse a Hardcover book from API response"""
@@ -236,6 +297,7 @@ def _parse_hardcover_book(book_data: dict) -> schemas.HardcoverBook:
             default_physical_edition_id=book_dict.get("default_physical_edition_id"),
             default_ebook_edition_id=book_dict.get("default_ebook_edition_id"),
             default_audio_edition_id=book_dict.get("default_audio_edition_id"),
+            editions=book_dict.get("editions"),
             release_year=book_dict.get("release_year"),
             release_date=book_dict.get("release_date"),
             pages=book_dict.get("pages"),
@@ -804,15 +866,228 @@ async def lookup_book_by_slug(slug: str, db: Session = None) -> Optional[dict]:
         return None
 
 
-async def lookup_book_by_title_author(title: str, author: str = None, db: Session = None) -> Optional[dict]:
+def _normalize_match_text(value: Optional[str]) -> str:
+    """Normalize human-readable metadata for conservative matching."""
+    if not value:
+        return ""
+
+    return " ".join(
+        "".join(
+            char.lower()
+            if char.isalnum()
+            else " "
+            for char in str(value)
+        ).split()
+    )
+
+
+def _candidate_author_names(book_data: dict) -> list[str]:
+    """Extract author names from a Hardcover book/search payload."""
+    names = []
+
+    for contribution in book_data.get("contributions") or []:
+        author = contribution.get("author") or {}
+        name = author.get("name")
+        if name:
+            names.append(name)
+
+    for contribution in book_data.get("cached_contributors") or []:
+        author = contribution.get("author") or {}
+        name = author.get("name")
+        if name:
+            names.append(name)
+
+    return names
+
+
+def _author_matches(requested_author: Optional[str], book_data: dict) -> bool:
+    """Require a meaningful author match when an author was supplied."""
+    if not requested_author:
+        return True
+
+    requested = _normalize_match_text(requested_author)
+    if not requested:
+        return True
+
+    candidate_authors = [
+        _normalize_match_text(name)
+        for name in _candidate_author_names(book_data)
+        if name
+    ]
+
+    if not candidate_authors:
+        return False
+
+    return any(
+        requested == candidate
+        or requested in candidate
+        or candidate in requested
+        for candidate in candidate_authors
+    )
+
+
+async def lookup_book_by_isbn(
+    isbn: str,
+    db: Session = None
+) -> Optional[dict]:
     """
-    Search for a book on Hardcover by title and optionally author.
-    Returns the best match or None if not found.
+    Resolve an ISBN to its Hardcover parent book/work.
+
+    Returns None only when Hardcover successfully answers but no edition
+    with the requested ISBN is found.
+
+    API/rate-limit failures intentionally propagate to the caller so they
+    are not mistaken for a definitive "not found" result.
+    """
+    normalized_isbn = _normalize_isbn(isbn)
+    if not normalized_isbn:
+        return None
+
+    search_query = """
+    query SearchBooks($query: String!) {
+      search(query: $query) {
+        error
+        results
+      }
+    }
+    """
+
+    result = await execute_graphql(
+        search_query,
+        {"query": normalized_isbn},
+        db
+    )
+
+    search_response = result.get("search", {})
+    results_obj = (
+        search_response.get("results", {})
+        if isinstance(search_response, dict)
+        else {}
+    )
+    hits = (
+        results_obj.get("hits", [])
+        if isinstance(results_obj, dict)
+        else []
+    )
+
+    candidate_ids = []
+
+    for hit in hits[:10]:
+        doc = hit.get("document", {})
+        if doc and doc.get("id"):
+            try:
+                candidate_ids.append(int(doc["id"]))
+            except (TypeError, ValueError):
+                continue
+
+    if not candidate_ids:
+        logger.info(
+            "hardcover_isbn_no_match",
+            isbn=normalized_isbn
+        )
+        return None
+
+    full_query = """
+    query GetBooksForIsbn($ids: [Int!]!) {
+      books(where: {id: {_in: $ids}}) {
+        id
+        title
+        slug
+        release_year
+        release_date
+        pages
+        description
+        cached_image
+        cached_contributors
+        rating
+        ratings_count
+        users_count
+        activities_count
+        default_ebook_edition_id
+        default_audio_edition_id
+        default_physical_edition_id
+        editions {
+          isbn_10
+          isbn_13
+        }
+        book_series {
+          position
+          series {
+            id
+            name
+          }
+        }
+        contributions {
+          author {
+            id
+            name
+            slug
+          }
+        }
+        taggings(limit: 10) {
+          tag {
+            tag
+          }
+        }
+      }
+    }
+    """
+
+    full_result = await execute_graphql(
+        full_query,
+        {"ids": candidate_ids},
+        db
+    )
+
+    books = full_result.get("books", []) or []
+
+    for book in books:
+        edition_isbns = set()
+
+        for edition in book.get("editions") or []:
+            for value in (
+                edition.get("isbn_10"),
+                edition.get("isbn_13"),
+            ):
+                normalized = _normalize_isbn(value)
+                if normalized:
+                    edition_isbns.add(normalized)
+
+        if normalized_isbn in edition_isbns:
+            logger.info(
+                "hardcover_isbn_match_found",
+                isbn=normalized_isbn,
+                matched_id=book.get("id"),
+                matched_title=book.get("title"),
+            )
+            return book
+
+    logger.info(
+        "hardcover_isbn_no_verified_match",
+        isbn=normalized_isbn,
+        candidate_count=len(books),
+    )
+    return None
+
+
+async def lookup_book_by_title_author(
+    title: str,
+    author: str = None,
+    published_year: int = None,
+    db: Session = None
+) -> Optional[dict]:
+    """
+    Conservatively match a Hardcover book by title and author.
+
+    Exact normalized title and matching author are required.
+    Publication year is used to rank otherwise-valid candidates.
+
+    Returns None only for a genuine no-match result. API failures propagate.
     """
     search_query = title
     if author:
         search_query = f"{title} {author}"
-    
+
     query = """
     query SearchBooks($query: String!) {
       search(query: $query) {
@@ -822,72 +1097,166 @@ async def lookup_book_by_title_author(title: str, author: str = None, db: Sessio
     }
     """
 
-    try:
-        result = await execute_graphql(query, {"query": search_query}, db)
-        search_response = result.get("search", {})
-        results_obj = search_response.get("results", {}) if isinstance(search_response, dict) else {}
-        hits = results_obj.get("hits", []) if isinstance(results_obj, dict) else []
+    result = await execute_graphql(
+        query,
+        {"query": search_query},
+        db
+    )
 
-        for hit in hits[:5]:
-            doc = hit.get("document", {})
-            if doc and doc.get("id"):
-                # Found a match - now fetch full details
-                book_id = doc.get("id")
-                logger.info("hardcover_search_match_found", 
-                          search=search_query, 
-                          matched_id=book_id, 
-                          matched_title=doc.get("title"))
-                
-                # Fetch full book details using the ID
-                full_query = """
-                query GetBook($id: Int!) {
-                  books_by_pk(id: $id) {
-                    id
-                    title
-                    slug
-                    release_year
-                    release_date
-                    pages
-                    description
-                    cached_image
-                    cached_contributors
-                    rating
-                    ratings_count
-                    users_count
-                    activities_count
-                    default_ebook_edition_id
-                    default_audio_edition_id
-                    default_physical_edition_id
-                    book_series {
-                      position
-                      series {
-                        id
-                        name
-                      }
-                    }
-                    contributions {
-                      author {
-                        id
-                        name
-                        slug
-                      }
-                    }
-                    taggings(limit: 10) {
-                      tag {
-                        tag
-                      }
-                    }
-                  }
-                }
-                """
-                full_result = await execute_graphql(full_query, {"id": int(book_id)}, db)
-                return full_result.get("books_by_pk")
-        
-        logger.warning("hardcover_search_no_match", search=search_query)
+    search_response = result.get("search", {})
+    results_obj = (
+        search_response.get("results", {})
+        if isinstance(search_response, dict)
+        else {}
+    )
+    hits = (
+        results_obj.get("hits", [])
+        if isinstance(results_obj, dict)
+        else []
+    )
+
+    requested_title = _normalize_match_text(title)
+
+    candidate_ids = []
+
+    for hit in hits[:10]:
+        doc = hit.get("document", {})
+
+        if not doc or not doc.get("id"):
+            continue
+
+        candidate_title = _normalize_match_text(
+            doc.get("title")
+        )
+
+        # Do not let "summary/study guide/articles about..." results
+        # win merely because the requested title appears inside them.
+        if candidate_title != requested_title:
+            continue
+
+        if not _author_matches(author, doc):
+            continue
+
+        try:
+            candidate_ids.append(int(doc["id"]))
+        except (TypeError, ValueError):
+            continue
+
+    if not candidate_ids:
+        logger.warning(
+            "hardcover_search_no_confident_match",
+            search=search_query,
+            title=title,
+            author=author,
+            published_year=published_year,
+        )
         return None
-    except Exception as e:
-        logger.error("hardcover_search_error", search=search_query, error=str(e))
+
+    full_query = """
+    query GetBookCandidates($ids: [Int!]!) {
+      books(where: {id: {_in: $ids}}) {
+        id
+        title
+        slug
+        release_year
+        release_date
+        pages
+        description
+        cached_image
+        cached_contributors
+        rating
+        ratings_count
+        users_count
+        activities_count
+        default_ebook_edition_id
+        default_audio_edition_id
+        default_physical_edition_id
+        book_series {
+          position
+          series {
+            id
+            name
+          }
+        }
+        contributions {
+          author {
+            id
+            name
+            slug
+          }
+        }
+        taggings(limit: 10) {
+          tag {
+            tag
+          }
+        }
+      }
+    }
+    """
+
+    full_result = await execute_graphql(
+        full_query,
+        {"ids": candidate_ids},
+        db
+    )
+
+    candidates = []
+
+    for book in full_result.get("books", []) or []:
+        if (
+            _normalize_match_text(book.get("title"))
+            != requested_title
+        ):
+            continue
+
+        if not _author_matches(author, book):
+            continue
+
+        candidate_year = book.get("release_year")
+
+        if published_year and candidate_year:
+            try:
+                year_distance = abs(
+                    int(candidate_year) - int(published_year)
+                )
+            except (TypeError, ValueError):
+                year_distance = 9999
+        elif published_year:
+            year_distance = 9999
+        else:
+            year_distance = 0
+
+        candidates.append(
+            (year_distance, book)
+        )
+
+    if not candidates:
+        logger.warning(
+            "hardcover_search_no_confident_match",
+            search=search_query,
+            title=title,
+            author=author,
+            published_year=published_year,
+        )
         return None
+
+    candidates.sort(
+        key=lambda item: item[0]
+    )
+
+    year_distance, best = candidates[0]
+
+    logger.info(
+        "hardcover_search_match_found",
+        search=search_query,
+        matched_id=best.get("id"),
+        matched_title=best.get("title"),
+        matched_year=best.get("release_year"),
+        requested_year=published_year,
+        year_distance=year_distance,
+    )
+
+    return best
 
 
 @router.get("/search", response_model=schemas.HardcoverBooksResponse)
@@ -1024,13 +1393,95 @@ async def search_books(
             logger.info("search_no_valid_books", query=query)
             return schemas.HardcoverBooksResponse(books=[])
         
+        # Fetch full Hardcover records for the search results so availability
+        # matching can inspect ISBNs from every edition of each work.
+        search_ids = [
+            int(book_data["id"])
+            for book_data in books_data
+            if book_data.get("id")
+        ]
+
+        if search_ids:
+            full_books_query = """
+            query SearchBooksAvailability($ids: [Int!]!) {
+              books(where: {id: {_in: $ids}}) {
+                id
+                title
+                slug
+                release_year
+                release_date
+                pages
+                description
+                cached_image
+                cached_contributors
+                rating
+                ratings_count
+                users_count
+                activities_count
+                default_ebook_edition_id
+                default_audio_edition_id
+                default_physical_edition_id
+                compilation
+                editions {
+                  isbn_10
+                  isbn_13
+                }
+                book_series {
+                  series {
+                    id
+                    name
+                  }
+                  position
+                }
+                contributions {
+                  author {
+                    id
+                    name
+                    slug
+                  }
+                }
+                taggings(limit: 5) {
+                  tag {
+                    tag
+                  }
+                }
+              }
+            }
+            """
+
+            full_result = await execute_graphql(
+                full_books_query,
+                {"ids": search_ids},
+                db=db
+            )
+
+            full_books_data = full_result.get("books", []) or []
+
+            # Preserve the ordering returned by Hardcover search.
+            full_books_by_id = {
+                int(item["id"]): item
+                for item in full_books_data
+                if item.get("id")
+            }
+
+            ordered_full_books = [
+                full_books_by_id[book_id]
+                for book_id in search_ids
+                if book_id in full_books_by_id
+            ]
+
+            # Fall back to lightweight search documents only if Hardcover
+            # unexpectedly omitted the full records.
+            if ordered_full_books:
+                books_data = ordered_full_books
+
         # Parse books
         books = [_parse_hardcover_book(book) for book in books_data]
-        
+
         # Save ALL results to database first
         for book_data in books_data:
             _save_book_to_db(book_data, db)
-        
+
         # Enrich with local availability data
         books = _enrich_books_with_availability(books, db)
         
@@ -1153,6 +1604,10 @@ async def search_grouped(
                 users_count
                 activities_count
                 compilation
+                editions {
+                  isbn_10
+                  isbn_13
+                }
                 book_series {
                   series {
                     id
@@ -1532,11 +1987,16 @@ async def get_book_details(
                     book_dict["cached_contributors"] = None
             book = schemas.HardcoverBookDetail.model_validate(book_dict)
         
-        # Enrich with local availability (if present)
+        # Enrich with local availability using Hardcover ID and edition ISBNs
+        enriched_books = _enrich_books_with_availability([book], db)
+        if enriched_books:
+            enriched = enriched_books[0]
+            book.ebook_available = enriched.ebook_available
+            book.audiobook_available = enriched.audiobook_available
+
+        # Preserve locally-known series metadata when Hardcover omits it
         db_book = db.query(Book).filter(Book.hardcover_id == book_id).first()
         if db_book:
-            book.ebook_available = db_book.ebook_available or False
-            book.audiobook_available = db_book.audiobook_available or False
             if not book.book_series and db_book.series_id:
                 book.book_series = [
                     schemas.HardcoverBookSeries(
@@ -2116,6 +2576,10 @@ async def get_series_books(
                 default_audio_edition_id
                 default_physical_edition_id
                 compilation
+                editions {
+                  isbn_10
+                  isbn_13
+                }
                 book_series {
                   series {
                     id
@@ -2188,6 +2652,10 @@ async def get_series_books(
                     default_audio_edition_id
                     default_physical_edition_id
                     compilation
+                    editions {
+                      isbn_10
+                      isbn_13
+                    }
                     book_series {
                       series {
                         id

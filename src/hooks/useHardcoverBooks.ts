@@ -54,8 +54,10 @@ async function enrichAvailability(books: Book[]): Promise<Book[]> {
       }
       return {
         ...book,
-        ebookAvailable: match.ebook,
-        audiobookAvailable: match.audiobook,
+        // Batch availability is supplemental. Never erase availability
+        // already reported by BookKeep's local library synchronization.
+        ebookAvailable: book.ebookAvailable || match.ebook,
+        audiobookAvailable: book.audiobookAvailable || match.audiobook,
       };
     });
   } catch {
